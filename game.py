@@ -1,0 +1,2 @@
+def catan(igra):
+    igra = []
