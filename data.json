@@ -1,0 +1,81 @@
+{
+  "board": [
+    {
+      "type": "wood",
+      "number": 11
+    },
+    {
+      "type": "brick",
+      "number": 4
+    },
+    {
+      "type": "sheep",
+      "number": 9
+    },
+    {
+      "type": "wheat",
+      "number": 5
+    },
+    {
+      "type": "ore",
+      "number": 2
+    },
+    {
+      "type": "wood",
+      "number": 6
+    },
+    {
+      "type": "wood",
+      "number": 3
+    },
+    {
+      "type": "desert",
+      "number": null
+    },
+    {
+      "type": "sheep",
+      "number": 8
+    },
+    {
+      "type": "wheat",
+      "number": 10
+    },
+    {
+      "type": "ore",
+      "number": 9
+    },
+    {
+      "type": "sheep",
+      "number": 12
+    },
+    {
+      "type": "brick",
+      "number": 6
+    },
+    {
+      "type": "wheat",
+      "number": 11
+    },
+    {
+      "type": "sheep",
+      "number": 3
+    },
+    {
+      "type": "wood",
+      "number": 4
+    },
+    {
+      "type": "ore",
+      "number": 8
+    },
+    {
+      "type": "brick",
+      "number": 10
+    },
+    {
+      "type": "wheat",
+      "number": 5
+    }
+  ],
+  "players": []
+}
