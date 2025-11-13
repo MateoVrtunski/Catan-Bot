@@ -1,0 +1,88 @@
+[
+  [
+    {
+      "type": "wheat",
+      "token": 5
+    },
+    {
+      "type": "ore",
+      "token": 2
+    },
+    {
+      "type": "wood",
+      "token": 6
+    }
+  ],
+  [
+    {
+      "type": "sheep",
+      "token": 3
+    },
+    {
+      "type": "brick",
+      "token": 8
+    },
+    {
+      "type": "wood",
+      "token": 10
+    },
+    {
+      "type": "wheat",
+      "token": 9
+    }
+  ],
+  [
+    {
+      "type": "wood",
+      "token": 12
+    },
+    {
+      "type": "sheep",
+      "token": 11
+    },
+    {
+      "type": "desert",
+      "token": null
+    },
+    {
+      "type": "ore",
+      "token": 4
+    },
+    {
+      "type": "wheat",
+      "token": 8
+    }
+  ],
+  [
+    {
+      "type": "brick",
+      "token": 10
+    },
+    {
+      "type": "sheep",
+      "token": 9
+    },
+    {
+      "type": "ore",
+      "token": 4
+    },
+    {
+      "type": "wood",
+      "token": 5
+    }
+  ],
+  [
+    {
+      "type": "wheat",
+      "token": 6
+    },
+    {
+      "type": "brick",
+      "token": 3
+    },
+    {
+      "type": "sheep",
+      "token": 11
+    }
+  ]
+]

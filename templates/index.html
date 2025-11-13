@@ -1,72 +1,38 @@
-<!-- FILE: templates/index.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Catan board editor — index.html</title>
-  <style>
-    :root{ --bg:#0f172a; --panel:#0b1220; --muted:#9aa4b2; --accent:#60a5fa; }
-    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071029 0%, #081224 100%);color:#e6eef6;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial}
-
-    /* center the whole app in the window */
-    .app-outer{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
-
-    .app{display:flex;gap:16px;max-width:1200px;width:100%;}
-    .panel{background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
-    .left{width:760px;display:flex;flex-direction:column;align-items:center}
-    .board-wrap{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:18px;border-radius:12px}
-    svg{display:block}
-    h1{margin:0 0 12px 0;font-size:18px}
-    .controls{width:360px;display:flex;flex-direction:column;gap:10px}
-    .tile-list{max-height:68vh;overflow:auto;padding:6px;border-radius:8px;background:rgba(255,255,255,0.01)}
-    .tile-row{display:flex;gap:8px;align-items:center;padding:6px;border-radius:6px}
-    select,input[type=number]{padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
-    button{padding:8px 10px;border-radius:8px;border:0;background:var(--accent);color:#04203a;cursor:pointer}
-    label{font-size:12px;color:var(--muted)}
-    .hex-number{font-weight:700;fill:#071224;font-size:18px}
-    .hex-token-circle{stroke:#071224;stroke-width:2}
-    .warn{color:#ffb703;font-size:13px}
-    .small{font-size:12px;color:var(--muted)}
-    .flex{display:flex;gap:8px}
-
-    /* highlight for 6 and 8 */
-    .hex-token-circle.hot{fill:#ffb4a2}
-    /* flash highlight */
-    .flash polygon{stroke-width:5;stroke:#ffd166}
-
-    /* harbour tooltip */
-    .harbour-label{font-size:10px;fill:#04203a;font-weight:700}
-  </style>
+  <!-- use Flask's static helper; if you open file directly you can change this to "static/style.css" -->
+  <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
   <div class="app-outer">
     <div class="app">
       <div class="left panel">
-        <h1>Settlers (Catan) — Board editor (official-shaped)</h1>
+        <h1>CATAN</h1>
         <div class="board-wrap" id="boardWrap">
           <!-- SVG board rendered by JS -->
-          <svg id="boardSvg" width="760" height="620" viewBox="0 0 760 620"></svg>
+          <svg id="boardSvg" width="760" height="620" viewBox="-380 -310 760 620"></svg>
         </div>
-        <p class="small" style="margin-top:8px">This layout draws the 19 land hexes in the standard 3-4-5-4-3 arrangement and a surrounding water ring (with harbour markers placed on edges so you can tell which side they belong to). Click a land tile to focus its inputs.</p>
       </div>
 
       <div class="controls panel">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
             <strong>Tile inputs</strong>
-            <div class="small">Edit each tile's resource + token number. Export/Import JSON or save to server.</div>
+            <div class="small">Edit each tile's resource + token number. Save to play.</div>
           </div>
           <div class="flex">
-            <button id="exportBtn">Export JSON</button>
-            <button id="saveBtn">Save to server</button>
-            <button id="importBtn">Import JSON</button>
+            <button id="saveBtn">Save to server and play</button>
+            <button id="loadFromServer">Load from server</button>
           </div>
         </div>
 
         <div style="display:flex;gap:8px;align-items:center">
           <label class="small">Hex size</label>
-          <input id="sizeInput" type="number" value="70" min="40" max="120" style="width:80px" />
+          <input id="sizeInput" type="number" value="55" min="30" max="80" style="width:80px" />
         </div>
 
         <div class="tile-list panel" id="tileList"></div>
@@ -74,226 +40,246 @@
         <div style="display:flex;gap:8px;margin-top:8px">
           <button id="resetBtn">Reset empty</button>
           <button id="fillStd">Fill standard sample</button>
-          <button id="loadFromServer">Load from server</button>
         </div>
 
-        <textarea id="jsonArea" placeholder='Paste JSON here to import' style="width:100%;height:130px;margin-top:8px;background:transparent;color:inherit;border:1px solid rgba(255,255,255,0.04);padding:8px;border-radius:6px"></textarea>
-
-        <div class="small" style="margin-top:6px">JSON format: array of 19 objects: {"type":"wood","number":8}. Use "desert" for desert (number ignored). Save will POST to <code>/api/board</code>.</div>
+        <div class="small" style="margin-top:6px">Saves are kept in server memory (a simple list inside <code>game.py</code>) — they are not persisted to disk. Use "Load from server" to retrieve the most recently saved board.</div>
       </div>
     </div>
   </div>
 
-  <script>
-  // ======= Catan board editor (with improved harbour placement + centered page) ======
-  const TILE_COLORS = { wood: '#2f9e44', brick: '#c2410c', sheep: '#9ae6b4', wheat: '#f6e05e', ore: '#94a3b8', desert: '#d6c9a8', water: '#7dd3fc' };
+<script>
+/* ---------- constants ---------- */
+const TILE_COLORS = { wood:'#2f9e44', brick:'#c2410c', sheep:'#9ae6b4', wheat:'#f6e05e', ore:'#94a3b8', desert:'#d6c9a8', water:'#7dd3fc' };
 
-  // axial coord helpers
-  function generateAxialCoordsRadius(maxRadius){
-    const coords = [];
-    for(let r=-maxRadius;r<=maxRadius;r++){
-      for(let q=-maxRadius;q<=maxRadius;q++){
-        const s = -q-r;
-        if(Math.max(Math.abs(q),Math.abs(r),Math.abs(s))<=maxRadius) coords.push({q,r});
-      }
-    }
-    return coords;
-  }
+const HARBOUR_POS = [
+  {q:0.05,r:-2.65,type:'3:1'}, {q:1.65,r:-2.55,type:'brick'}, {q:2.55,r:-1.6,type:'3:1'},
+  {q:2.6,r:0,type:'sheep'}, {q:0.95,r:1.65,type:'3:1'}, {q:-0.9,r:2.55,type:'wood'},
+  {q:-2.55,r:2.55,type:'3:1'}, {q:-2.6,r:1,type:'wheat'}, {q:-1.7,r:-0.9,type:'ore'}
+];
 
-  const LAND_AXIAL = generateAxialCoordsRadius(2).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))<=2);
-  LAND_AXIAL.sort((a,b)=> a.r - b.r || a.q - b.q);
-  const ALL_RADIUS3 = generateAxialCoordsRadius(3);
-  const WATER_AXIAL = ALL_RADIUS3.filter(c=> Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))===3);
+// SAMPLE board (19 tiles) — used by "Fill standard sample" button
+const SAMPLE = [
+  {type:'ore', number:10},{type:'sheep', number:2},{type:'wood', number:9},{type:'wheat', number:12},{type:'brick', number:6},
+  {type:'sheep', number:4},{type:'brick', number:10},{type:'wheat', number:9},{type:'wood', number:11},{type:'desert', number:null},
+  {type:'wood', number:3},{type:'ore', number:8},{type:'wood', number:8},{type:'ore', number:3},{type:'wheat', number:4},
+  {type:'sheep', number:5},{type:'brick', number:5},{type:'wheat', number:6},{type:'sheep', number:11}
+];
 
-  // harbour definitions use a water axial coordinate and label
-  const HARBOUR_POS = [
-    {q:0,r:-3,type:'3:1'}, {q:2,r:-3,type:'brick 2:1'}, {q:3,r:-2,type:'3:1'},
-    {q:3,r:0,type:'sheep 2:1'}, {q:2,r:2,type:'3:1'}, {q:0,r:3,type:'wood 2:1'},
-    {q:-2,r:3,type:'3:1'}, {q:-3,r:2,type:'wheat 2:1'}, {q:-3,r:0,type:'ore 2:1'}
-  ];
+/* ---------- state ---------- */
+let board = [];
+let harbours = HARBOUR_POS.map(h => ({...h}));
+let hexSize = 55;
 
-  // user-updated sample (you provided)
-  function emptyBoard(){ return LAND_AXIAL.map(_=>({type:'', number:null})); }
-  const SAMPLE = [
-    {type:'ore', number:10},{type:'sheep', number:2},{type:'wood', number:9},{type:'wheat', number:12},{type:'brick', number:6},
-    {type:'sheep', number:4},{type:'brick', number:10},{type:'wheat', number:9},{type:'wood', number:11},{type:'desert', number:null},
-    {type:'wood', number:3},{type:'ore', number:8},{type:'wood', number:8},{type:'ore', number:3},{type:'wheat', number:4},
-    {type:'sheep', number:5},{type:'brick', number:5},{type:'wheat', number:6},{type:'sheep', number:11}
-  ];
+// precompute axial lists (sorted to match expected indexing)
+const LAND_AXIAL = (() => {
+  const arr = generateAxialCoordsRadius(2).filter(c => Math.max(Math.abs(c.q), Math.abs(c.r), Math.abs(-c.q-c.r)) <= 2);
+  arr.sort((a,b) => a.r - b.r || a.q - b.q);
+  return arr;
+})();
+const WATER_AXIAL = generateAxialCoordsRadius(3).filter(c => Math.max(Math.abs(c.q), Math.abs(c.r), Math.abs(-c.q-c.r)) === 3);
 
-  let board = emptyBoard();
-  let hexSize = 70;
+/* ---------- DOM refs ---------- */
+const svg = document.getElementById('boardSvg');
+const tileList = document.getElementById('tileList');
+const sizeInput = document.getElementById('sizeInput');
 
-  const svg = document.getElementById('boardSvg');
-  const tileList = document.getElementById('tileList');
-  const jsonArea = document.getElementById('jsonArea');
-  const sizeInput = document.getElementById('sizeInput');
+/* add harbour editor area below tile list */
+const harbourHeading = document.createElement('strong');
+harbourHeading.style.marginTop = '12px';
+harbourHeading.textContent = 'Harbours';
+document.querySelector('.controls').appendChild(harbourHeading);
 
-  sizeInput.addEventListener('change', ()=>{ hexSize = parseInt(sizeInput.value)||70; render(); });
+const harbourList = document.createElement('div');
+harbourList.className = 'tile-list panel';
+document.querySelector('.controls').appendChild(harbourList);
 
-  document.getElementById('exportBtn').addEventListener('click', ()=>{ jsonArea.value = JSON.stringify(board, null, 2); });
-  document.getElementById('importBtn').addEventListener('click', ()=>{ try{ const parsed = JSON.parse(jsonArea.value); if(!Array.isArray(parsed)||parsed.length!==19) throw new Error('Array of 19 required'); board = parsed.map(t=>({type:t.type||'', number: t.number==null?null:Number(t.number)})); render(); rebuildInputs(); }catch(e){alert('Import failed: '+e.message)} });
+/* ---------- event wiring ---------- */
+sizeInput.addEventListener('change', () => { hexSize = parseInt(sizeInput.value) || 55; render(); });
 
-  document.getElementById('saveBtn').addEventListener('click', async ()=>{
-    try{
-      const res = await fetch('/api/board', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(board)});
-      if(!res.ok) throw new Error(await res.text());
-      alert('Saved to server');
-    }catch(e){alert('Save failed: '+e.message)}
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  try {
+    const res = await fetch('/api/board', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ board, harbours })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    alert('Saved to server');
+  } catch (e) { alert('Save failed: ' + e.message); }
+});
+
+document.getElementById('loadFromServer').addEventListener('click', loadFromServer);
+document.getElementById('resetBtn').addEventListener('click', () => { board = emptyBoard(); render(); rebuildInputs(); });
+document.getElementById('fillStd').addEventListener('click', () => { board = SAMPLE.map(x => ({ ...x })); render(); rebuildInputs(); });
+
+/* ---------- helpers & rendering ---------- */
+function emptyBoard(){ return LAND_AXIAL.map(_ => ({ type:'', number:null })); }
+
+function rebuildInputs(){
+  tileList.innerHTML = '';
+  board.forEach((tile,i) => {
+    const row = document.createElement('div'); row.className = 'tile-row';
+    const idx = document.createElement('div'); idx.innerHTML = `<strong>#${i+1}</strong>`; idx.style.width = '48px';
+    const sel = document.createElement('select');
+    ['','wood','brick','sheep','wheat','ore','desert'].forEach(t => {
+      const o = document.createElement('option'); o.value = t; o.textContent = t || '---'; if (t === tile.type) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => { board[i].type = sel.value; render(); });
+    const num = document.createElement('input'); num.type = 'number'; num.min = 2; num.max = 12; num.style.width = '86px';
+    num.value = tile.number ?? '';
+    num.addEventListener('change', () => { const v = num.value; board[i].number = v === '' ? null : Number(v); render(); });
+    row.append(idx, sel, num);
+    tileList.appendChild(row);
   });
 
-  document.getElementById('loadFromServer').addEventListener('click', loadFromServer);
-  document.getElementById('resetBtn').addEventListener('click', ()=>{board=emptyBoard(); render(); rebuildInputs();});
-  document.getElementById('fillStd').addEventListener('click', ()=>{board = SAMPLE.map(x=>Object.assign({},x)); render(); rebuildInputs();});
+  // Harbour editor
+  harbourList.innerHTML = '';
+  harbours.forEach((h,i) => {
+    const row = document.createElement('div'); row.className = 'tile-row';
+    const lbl = document.createElement('div'); lbl.textContent = `H${i+1}`; lbl.style.width = '40px';
+    const sel = document.createElement('select');
+    ['3:1','wood','brick','sheep','wheat','ore'].forEach(t => {
+      const o = document.createElement('option'); o.value = t; o.textContent = t; if (h.type === t) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', () => { h.type = sel.value; render(); });
+    row.append(lbl, sel);
+    harbourList.appendChild(row);
+  });
+}
 
-  async function loadFromServer(){
-    try{
-      const res = await fetch('/api/board');
-      if(!res.ok) throw new Error('no board on server');
-      const data = await res.json();
-      if(!Array.isArray(data) || data.length!==19) throw new Error('invalid board data');
-      board = data.map(t=>({type:t.type||'',number:t.number==null?null:Number(t.number)}));
-      render(); rebuildInputs();
-    }catch(e){alert('Load failed: '+e.message)}
+function focusTile(index){
+  const el = document.querySelector(`#land-${index}`);
+  if(!el) return;
+  el.classList.add('flash');
+  setTimeout(()=> el.classList.remove('flash'), 700);
+}
+
+function axialToPixel(q,r,size){ const w = Math.sqrt(3) * size; const x = w * (q + r/2); const y = (3/2) * size * r; return {x,y}; }
+function polygonPoints(cx,cy,size){ const pts = []; for(let i = 0; i < 6; i++){ const a = Math.PI/180 * (60 * i - 30); pts.push(`${cx + size * Math.cos(a)},${cy + size * Math.sin(a)}`); } return pts.join(' '); }
+
+function render(){
+  const size = hexSize;
+  svg.innerHTML = '';
+
+  // draw water hexes
+  WATER_AXIAL.forEach(ax => {
+    const p = axialToPixel(ax.q, ax.r, size);
+    const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', polygonPoints(p.x, p.y, size));
+    poly.setAttribute('fill', TILE_COLORS.water);
+    poly.setAttribute('stroke', '#033657');
+    poly.setAttribute('stroke-width', '2');
+    svg.appendChild(poly);
+  });
+
+  // draw land hexes in LAND_AXIAL order (keeps index mapping stable)
+  LAND_AXIAL.forEach((ax, i) => {
+    const p = axialToPixel(ax.q, ax.r, size);
+    const t = board[i] || { type:'', number:null };
+    const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', polygonPoints(p.x, p.y, size));
+    poly.setAttribute('fill', TILE_COLORS[t.type] || '#0b1220');
+    poly.setAttribute('stroke', '#071224');
+    poly.setAttribute('stroke-width', '2');
+    svg.appendChild(poly);
+
+    // resource label
+    const res = document.createElementNS('http://www.w3.org/2000/svg','text');
+    res.setAttribute('x', p.x);
+    res.setAttribute('y', p.y - size * 0.25);
+    res.setAttribute('text-anchor', 'middle');
+    res.setAttribute('dominant-baseline', 'middle');
+    res.setAttribute('class', 'small');
+    res.setAttribute('fill', '#071224');
+    res.textContent = t.type ? t.type.toUpperCase() : '';
+    svg.appendChild(res);
+
+    // number token
+    if (t.number != null && t.type !== 'desert' && t.number !== '') {
+      const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      circ.setAttribute('cx', p.x);
+      circ.setAttribute('cy', p.y + size * 0.22);
+      circ.setAttribute('r', size * 0.36);
+      circ.setAttribute('fill', '#f6f7f9');
+      circ.setAttribute('class', 'hex-token-circle');
+      circ.setAttribute('stroke', '#071224');
+      circ.setAttribute('stroke-width', '2');
+      if (Number(t.number) === 6 || Number(t.number) === 8) circ.classList.add('hot');
+      svg.appendChild(circ);
+
+      const num = document.createElementNS('http://www.w3.org/2000/svg','text');
+      num.setAttribute('x', p.x);
+      num.setAttribute('y', p.y + size * 0.22 + 6);
+      num.setAttribute('text-anchor', 'middle');
+      num.setAttribute('class', 'hex-number');
+      num.textContent = t.number;
+      svg.appendChild(num);
+    }
+
+    // desert robber
+    if (t.type === 'desert') {
+      const rob = document.createElementNS('http://www.w3.org/2000/svg','text');
+      rob.setAttribute('x', p.x);
+      rob.setAttribute('y', p.y + size * 0.26 + 6);
+      rob.setAttribute('text-anchor', 'middle');
+      rob.setAttribute('fill', '#3b3b3b');
+      rob.setAttribute('font-weight', '700');
+      rob.textContent = 'Robber';
+      svg.appendChild(rob);
+    }
+
+    // click to focus input
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    // wrap polygon and texts: for simplicity we used separate shapes above, but we still attach id to an empty group for flash target
+    g.setAttribute('id', `land-${i}`);
+    svg.appendChild(g);
+  });
+
+  // draw harbours as small circles with text
+  harbours.forEach((h,i) => {
+    // place harbour slightly outward from the water center so it's visible on the edge
+    const p = axialToPixel(h.q, h.r, size * 1.05);
+    const r = Math.max(10, size * 0.25);
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('cx', p.x);
+    circle.setAttribute('cy', p.y);
+    circle.setAttribute('r', r);
+    circle.setAttribute('fill', '#f8fafc');
+    circle.setAttribute('stroke', '#04203a');
+    circle.setAttribute('stroke-width', '1');
+    svg.appendChild(circle);
+
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x', p.x);
+    txt.setAttribute('y', p.y + 4);
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('class', 'harbour-label');
+    txt.textContent = h.type;
+    svg.appendChild(txt);
+  });
+}
+
+function generateAxialCoordsRadius(maxRadius){
+  const coords = [];
+  for(let r=-maxRadius; r<=maxRadius; r++){
+    for(let q=-maxRadius; q<=maxRadius; q++){
+      const s = -q - r;
+      if(Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= maxRadius) coords.push({q, r});
+    }
   }
+  return coords;
+}
 
-  function rebuildInputs(){
-    tileList.innerHTML='';
-    board.forEach((tile,i)=>{
-      const row = document.createElement('div'); row.className='tile-row';
-      const idx = document.createElement('div'); idx.innerHTML = `<strong>#${i+1}</strong>`; idx.style.width='48px';
-      const sel = document.createElement('select'); ['','wood','brick','sheep','wheat','ore','desert'].forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t||'---'; if(t===tile.type) o.selected=true; sel.appendChild(o); });
-      sel.addEventListener('change', ()=>{ board[i].type = sel.value; render(); });
-      const num = document.createElement('input'); num.type='number'; num.min=2; num.max=12; num.style.width='86px'; num.value = tile.number==null?'':tile.number; num.addEventListener('change', ()=>{ const v=num.value; board[i].number = v===''?null:Number(v); render(); });
-      const jump = document.createElement('button'); jump.textContent='Jump'; jump.style.padding='6px 8px'; jump.addEventListener('click', ()=>{ focusTile(i); });
-      row.appendChild(idx); row.appendChild(sel); row.appendChild(num); row.appendChild(jump); tileList.appendChild(row);
-    });
-  }
+</script>
 
-  function focusTile(index){ const el = document.querySelector(`#land-${index}`); if(!el) return; el.classList.add('flash'); setTimeout(()=>el.classList.remove('flash'),700); }
-
-  function axialToPixel(q,r,size){ const w = Math.sqrt(3)*size; const x = w * (q + r/2); const y = (3/2) * size * r; return {x,y}; }
-  function polygonPoints(cx,cy,size){ const pts=[]; for(let i=0;i<6;i++){ const angle = Math.PI/180 * (60*i - 30); const px = cx + size * Math.cos(angle); const py = cy + size * Math.sin(angle); pts.push(`${px},${py}`); } return pts.join(' '); }
-
-  // helper to produce a rotated triangle polygon centered at (cx,cy)
-  function trianglePoints(cx,cy,width,height,angleRad){
-    // base triangle pointing up (0,-h/2), (-w/2,h/2), (w/2,h/2)
-    const pts = [ [0,-height/2], [-width/2,height/2], [width/2,height/2] ];
-    const cos = Math.cos(angleRad), sin = Math.sin(angleRad);
-    const rot = pts.map(p=>{
-      const rx = p[0]*cos - p[1]*sin + cx;
-      const ry = p[0]*sin + p[1]*cos + cy;
-      return `${rx},${ry}`;
-    });
-    return rot.join(' ');
-  }
-
-  // axial neighbor directions (pointy-top axial)
-  const NEIGH_D = [ [1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1] ];
-
-  function render(){
-    const size = hexSize;
-    const landPixels = LAND_AXIAL.map(c=>axialToPixel(c.q,c.r,size));
-    const waterPixels = WATER_AXIAL.map(c=>axialToPixel(c.q,c.r,size));
-    const allX = landPixels.concat(waterPixels).map(p=>p.x); const allY = landPixels.concat(waterPixels).map(p=>p.y);
-    const minx = Math.min(...allX)-size*1.4; const maxx = Math.max(...allX)+size*1.4; const miny = Math.min(...allY)-size*1.6; const maxy = Math.max(...allY)+size*1.6;
-    const width = maxx-minx; const height = maxy-miny;
-    svg.setAttribute('viewBox', `${minx} ${miny} ${width} ${height}`);
-    svg.innerHTML='';
-
-    // compute center pixel (axial 0,0)
-    const center = axialToPixel(0,0,size);
-
-    // draw water hexes first
-    WATER_AXIAL.forEach((ax,i)=>{
-      const p = axialToPixel(ax.q,ax.r,size);
-      const points = polygonPoints(p.x,p.y,size);
-      const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
-      poly.setAttribute('points', points);
-      poly.setAttribute('fill', TILE_COLORS.water);
-      poly.setAttribute('stroke','#033657'); poly.setAttribute('stroke-width','2');
-      svg.appendChild(poly);
-    });
-
-    // draw harbour markers on the correct shared edge (find adjacent land neighbor)
-    HARBOUR_POS.forEach(h=>{
-      const wp = axialToPixel(h.q,h.r,size);
-      // find an adjacent land hex: check the six neighbors of the water axial
-      let landNeighbor = null;
-      for(const d of NEIGH_D){
-        const nq = h.q + d[0]; const nr = h.r + d[1];
-        // find same axial in LAND_AXIAL
-        for(const la of LAND_AXIAL){ if(la.q===nq && la.r===nr){ landNeighbor = la; break; } }
-        if(landNeighbor) break;
-      }
-
-      let placeX, placeY, angle;
-      if(landNeighbor){
-        const lp = axialToPixel(landNeighbor.q, landNeighbor.r, size);
-        // midpoint between centers (this corresponds to the shared edge center)
-        placeX = (wp.x + lp.x)/2;
-        placeY = (wp.y + lp.y)/2;
-        angle = Math.atan2(lp.y - wp.y, lp.x - wp.x); // point toward land
-      } else {
-        // fallback: point to board center
-        const vx = center.x - wp.x; const vy = center.y - wp.y; const dist = Math.sqrt(vx*vx + vy*vy) || 1; const ux = vx/dist; const uy = vy/dist;
-        placeX = wp.x + ux * (size * 0.85);
-        placeY = wp.y + uy * (size * 0.85);
-        angle = Math.atan2(uy, ux);
-      }
-
-      // triangle size relative to hex
-      const triW = Math.max(20, size*0.6);
-      const triH = Math.max(14, size*0.4);
-      // triangle points centered at placeX/placeY and rotated so the tip points toward the land
-      const triPts = trianglePoints(placeX, placeY, triW, triH, angle);
-      const tri = document.createElementNS('http://www.w3.org/2000/svg','polygon');
-      tri.setAttribute('points', triPts); tri.setAttribute('fill', '#f8fafc'); tri.setAttribute('stroke', '#04203a'); tri.setAttribute('stroke-width', 1);
-      svg.appendChild(tri);
-
-      // label slightly inward from the triangle center toward the land to avoid overlap with triangle
-      const labDist = triH*0.7;
-      const labX = placeX + Math.cos(angle) * labDist;
-      const labY = placeY + Math.sin(angle) * labDist + 4;
-      const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
-      txt.setAttribute('x', labX); txt.setAttribute('y', labY); txt.setAttribute('text-anchor','middle'); txt.setAttribute('class','harbour-label'); txt.textContent = h.type;
-      svg.appendChild(txt);
-    });
-
-    // draw land hexes
-    LAND_AXIAL.forEach((ax,i)=>{
-      const p = axialToPixel(ax.q,ax.r,size);
-      const tile = board[i] || {type:'',number:null};
-      const color = TILE_COLORS[tile.type] || '#0b1220';
-      const points = polygonPoints(p.x,p.y,size);
-
-      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-      g.setAttribute('id', `land-${i}`); g.setAttribute('data-index', i);
-      const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon'); poly.setAttribute('points', points); poly.setAttribute('fill', color); poly.setAttribute('stroke', '#071224'); poly.setAttribute('stroke-width','2');
-      g.appendChild(poly);
-
-      const res = document.createElementNS('http://www.w3.org/2000/svg','text'); res.setAttribute('x', p.x); res.setAttribute('y', p.y - size*0.25); res.setAttribute('text-anchor','middle'); res.setAttribute('dominant-baseline','middle'); res.setAttribute('class','small'); res.setAttribute('fill','#071224'); res.textContent = tile.type?tile.type.toUpperCase():''; g.appendChild(res);
-
-      if(tile.number!=null && tile.type!=='desert' && tile.number!==''){
-        const circ = document.createElementNS('http://www.w3.org/2000/svg','circle'); circ.setAttribute('cx', p.x); circ.setAttribute('cy', p.y + size*0.22); circ.setAttribute('r', size*0.36); circ.setAttribute('fill','#f6f7f9'); circ.setAttribute('class','hex-token-circle'); g.appendChild(circ);
-        const num = document.createElementNS('http://www.w3.org/2000/svg','text'); num.setAttribute('x', p.x); num.setAttribute('y', p.y + size*0.22 + 6); num.setAttribute('text-anchor','middle'); num.setAttribute('class','hex-number'); if(Number(tile.number)===6||Number(tile.number)===8){ circ.classList.add('hot'); } num.textContent = tile.number; g.appendChild(num);
-      }
-
-      if(tile.type==='desert'){
-        const rob = document.createElementNS('http://www.w3.org/2000/svg','text'); rob.setAttribute('x', p.x); rob.setAttribute('y', p.y + size*0.26 + 6); rob.setAttribute('text-anchor','middle'); rob.setAttribute('fill','#3b3b3b'); rob.setAttribute('font-weight','700'); rob.textContent = 'Robber'; g.appendChild(rob);
-      }
-
-      g.addEventListener('click', ()=>{ const inputRows = tileList.children; if(inputRows[i]) inputRows[i].querySelector('select').focus(); window.scrollTo({top:0,behavior:'smooth'}); });
-
-      svg.appendChild(g);
-    });
-  }
-
-  (async function init(){
-    try{ const res = await fetch('/api/board'); if(res.ok){ const data = await res.json(); if(Array.isArray(data) && data.length===19){ board = data.map(t=>({type:t.type||'', number:t.number==null?null:Number(t.number)})); } } }catch(e){}
-    rebuildInputs(); render();
-  })();
-  </script>
 </body>
 </html>
+
+
+
+
+
+
 
