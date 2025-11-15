@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Catan — Initial Placement</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <div class="app-outer">
+    <div class="app">
+
+      <div class="left panel">
+        <h1>CATAN — Initial Placement</h1>
+        <p class="small" id="statusText">Loading board...</p>
+
+        <div class="board-wrap" id="boardWrap" style="overflow:auto">
+          <svg id="boardSvg" width="760" height="620" viewBox="-380 -310 760 620"></svg>
+        </div>
+
+        <div style="margin-top:10px" id="placementInfo" class="small"></div>
+      </div>
+
+      <div class="controls panel" style="min-width:320px">
+        <div>
+          <strong>Placement</strong>
+          <div class="small">Click a highlighted intersection to select it, then confirm. You will place two settlements each (round 1: player 1→N; round 2: N→1).</div>
+        </div>
+
+        <div style="margin-top:10px">
+          <div id="currentTurn" class="small" style="font-weight:700;margin-bottom:6px"></div>
+          <div id="chosenInfo" class="small" style="margin-bottom:8px"></div>
+          <button id="confirmBtn" style="display:none">Confirm placement</button>
+          <button id="finishBtn" style="display:none;margin-left:8px">Finish (skip)</button>
+        </div>
+
+        <hr style="margin:12px 0">
+
+        <div>
+          <strong>Placed settlements</strong>
+          <div id="placedList" class="small" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+
+const TILE_COLORS = {
+  "wood": "#2e8b57",
+  "brick": "#b22222",
+  "sheep": "#9acd32",
+  "wheat": "#f4e28a",
+  "ore": "#808080",
+  "desert": "#e8d8a0"
+};
+
+/* ---------- helper copies of hex math (must match index.html) ---------- */
+function generateAxialCoordsRadius(maxRadius){
+  const coords=[];
+  for(let r=-maxRadius; r<=maxRadius; r++){
+    for(let q=-maxRadius; q<=maxRadius; q++){
+      const s = -q-r;
+      if(Math.max(Math.abs(q), Math.abs(r), Math.abs(s)) <= maxRadius) coords.push({q,r});
+    }
+  }
+  return coords;
+}
+function axialToPixel(q,r,size){ const w=Math.sqrt(3)*size; const x=w*(q + r/2); const y=(3/2)*size*r; return {x,y}; }
+function polygonPoints(cx,cy,size){const pts=[];for(let i=0;i<6;i++){const a=Math.PI/180*(60*i-30);pts.push(`${cx+size*Math.cos(a)},${cy+size*Math.sin(a)}`);}return pts.join(' ');}
+
+/* ---------- UI / state ---------- */
+const svg = document.getElementById('boardSvg');
+const statusText = document.getElementById('statusText');
+const currentTurnEl = document.getElementById('currentTurn');
+const chosenInfo = document.getElementById('chosenInfo');
+const confirmBtn = document.getElementById('confirmBtn');
+const placedList = document.getElementById('placedList');
+
+let hexSize = 55; // same sensible default as the editor
+let LAND_AXIAL, WATER_AXIAL;
+let board = [];         // 19 tiles from save
+let harbours = [];      // 9 harbours from save
+let players = [];       // players array from server: [{name,color},...]
+let intersections = []; // {id,x,y,adjacentHexes:[indices],occupiedBy:playerIndex|null, neighbors:[ids]}
+let placementSequence = []; // sequence of player indices in order of placement
+let placementIndex = 0; // index into placementSequence
+let selectedIntersection = null;
+
+/* ---------- fetch initial state ---------- */
+async function loadState(){
+  try{
+    const res = await fetch('/api/state');
+    if(!res.ok) throw new Error('no game state on server');
+    const data = await res.json();
+
+    board = Array.isArray(data.board) && data.board.length===19 ? data.board : Array(19).fill({type:'',number:null});
+    harbours = Array.isArray(data.harbours) ? data.harbours : [];
+    players = Array.isArray(data.players) ? data.players : [];
+
+    if(players.length < 2) {
+      statusText.textContent = 'Need at least 2 players. Go back to the players page.';
+      return;
+    }
+
+    // compute axial lists same order as editor
+    LAND_AXIAL = generateAxialCoordsRadius(2).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))<=2).sort((a,b)=> a.r - b.r || a.q - b.q);
+    WATER_AXIAL = generateAxialCoordsRadius(3).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))===3);
+
+    computeIntersections();
+    buildPlacementSequence();
+    render();
+    updateUI();
+    statusText.textContent = 'Place your settlements';
+  }catch(e){
+    statusText.textContent = 'Load failed: ' + e.message;
+  }
+}
+
+/* ---------- intersections construction ---------- */
+function computeIntersections(){
+  // compute vertices from each LAND hex and merge unique positions
+  const size = hexSize;
+  const vertexMap = new Map(); // key -> {x,y,adjacentHexes:set}
+  LAND_AXIAL.forEach((ax,hi) => {
+    const p = axialToPixel(ax.q, ax.r, size);
+    for(let vi=0; vi<6; vi++){
+      const angle = Math.PI/180 * (60*vi - 30);
+      const vx = p.x + size * Math.cos(angle);
+      const vy = p.y + size * Math.sin(angle);
+      const key = `${Math.round(vx*1000)}_${Math.round(vy*1000)}`;
+      if(!vertexMap.has(key)){
+        vertexMap.set(key, {x: vx, y: vy, adjacentHexes: new Set()});
+      }
+      vertexMap.get(key).adjacentHexes.add(hi);
+    }
+  });
+
+  // convert to array and assign ids
+  intersections = [];
+  let id = 0;
+  const temp = [];
+  for(const [k,v] of vertexMap.entries()){
+    temp.push({id: id++, x: v.x, y: v.y, adjacentHexes: Array.from(v.adjacentHexes), occupiedBy: null});
+  }
+
+  // compute neighbor adjacency between intersections (distance approx equal to hex side length => size)
+  const threshold = hexSize * 1.1;
+  for(let i=0;i<temp.length;i++){
+    temp[i].neighbors = [];
+    for(let j=0;j<temp.length;j++){
+      if(i===j) continue;
+      const dx = temp[i].x - temp[j].x;
+      const dy = temp[i].y - temp[j].y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if(d <= threshold) temp[i].neighbors.push(temp[j].id);
+    }
+  }
+
+  // store sorted by x then y to keep deterministic ids
+  temp.sort((a,b)=> a.x - b.x || a.y - b.y);
+  // reassign ids to be contiguous in sorted order and update neighbors' ids mapping
+  const idMap = new Map();
+  temp.forEach((t,i)=> idMap.set(t.id, i));
+  temp.forEach((t,i)=>{
+    t.id = i;
+    t.neighbors = t.neighbors.map(old => idMap.get(old));
+  });
+
+  intersections = temp;
+}
+
+/* ---------- build placement order: 0..N-1 then N-1..0 ---------- */
+function buildPlacementSequence(){
+  const n = players.length;
+  const seq = [];
+  for(let i=0;i<n;i++) seq.push(i);
+  for(let i=n-1;i>=0;i--) seq.push(i);
+  placementSequence = seq;
+  placementIndex = 0;
+}
+
+/* ---------- utility ---------- */
+function isLegalPlace(intersection){
+  // must touch at least one land hex
+  if(!intersection.adjacentHexes || intersection.adjacentHexes.length===0) return false;
+  // must be empty
+  if(intersection.occupiedBy !== null) return false;
+  // neighbors must be empty
+  for(const nid of intersection.neighbors || []) {
+    if(intersections[nid] && intersections[nid].occupiedBy !== null) return false;
+  }
+  return true;
+}
+
+function placeSettlement(playerIndex, intersectionId){
+  intersections[intersectionId].occupiedBy = playerIndex;
+  // save to server
+  fetch('/api/place', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ player: playerIndex, intersection: intersectionId })
+  }).catch(()=>{ /* ignore errors for now */ });
+}
+
+/* ---------- UI rendering ---------- */
+function render(){
+  const size = hexSize;
+  svg.innerHTML = '';
+
+  // draw water hexes
+  WATER_AXIAL.forEach(ax => {
+    const p = axialToPixel(ax.q, ax.r, size);
+    const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', polygonPoints(p.x, p.y, size));
+    poly.setAttribute('fill', TILE_COLORS.water);
+    poly.setAttribute('stroke', '#033657');
+    poly.setAttribute('stroke-width', '2');
+    svg.appendChild(poly);
+  });
+
+  // draw land tiles
+  LAND_AXIAL.forEach((ax, i) => {
+    const p = axialToPixel(ax.q, ax.r, size);
+    const t = board[i] || {type:'', number:null};
+    const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', polygonPoints(p.x, p.y, size));
+    poly.setAttribute('fill', TILE_COLORS[t.type] || '#0b1220');
+    poly.setAttribute('stroke', '#071224');
+    poly.setAttribute('stroke-width', '2');
+    svg.appendChild(poly);
+
+    // number token
+    if (t.number != null && t.type !== 'desert' && t.number !== '') {
+      const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      circ.setAttribute('cx', p.x);
+      circ.setAttribute('cy', p.y + size * 0.22);
+      circ.setAttribute('r', size * 0.36);
+      circ.setAttribute('fill', '#f6f7f9');
+      circ.setAttribute('stroke', '#071224');
+      circ.setAttribute('stroke-width', '2');
+      svg.appendChild(circ);
+
+      const num = document.createElementNS('http://www.w3.org/2000/svg','text');
+      num.setAttribute('x', p.x);
+      num.setAttribute('y', p.y + size * 0.22 + 6);
+      num.setAttribute('text-anchor', 'middle');
+      num.setAttribute('class', 'hex-number');
+      num.textContent = t.number;
+      svg.appendChild(num);
+    }
+  });
+
+  // draw intersections (clickable)
+  intersections.forEach((iv) => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('transform', `translate(${iv.x}, ${iv.y})`);
+    g.style.cursor = 'pointer';
+
+    // base circle
+    const base = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    base.setAttribute('r', Math.max(6, size*0.12));
+    base.setAttribute('cx', 0);
+    base.setAttribute('cy', 0);
+    base.setAttribute('fill', iv.occupiedBy===null ? '#eef3f7' : (players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#999'));
+    base.setAttribute('stroke', '#04203a');
+    base.setAttribute('stroke-width', iv.occupiedBy===null ? 1 : 2);
+    g.appendChild(base);
+
+    // if legal and empty, highlight
+    if(iv.occupiedBy===null && isLegalPlace(iv)){
+      base.setAttribute('fill', '#ffffff');
+      base.setAttribute('stroke', '#2ecc71');
+      base.setAttribute('stroke-width', 2);
+    }
+
+    // show small text of resources adjacent (first letters)
+    if(iv.adjacentHexes && iv.adjacentHexes.length>0){
+      const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('x', 0); label.setAttribute('y', -Math.max(10, size*0.18));
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('class', 'small');
+      const resNames = iv.adjacentHexes.map(hi => board[hi] && board[hi].type ? board[hi].type[0].toUpperCase() : '-').join(',');
+      label.textContent = resNames;
+      svg.appendChild(label);
+    }
+
+    // click handler to select
+    g.addEventListener('click', () => {
+      if(!isLegalPlace(iv)) return;
+      // mark selection
+      selectedIntersection = iv.id;
+      highlightSelection();
+      chosenInfo.textContent = `Selected intersection #${iv.id} — touches tiles: ${iv.adjacentHexes.join(',')}`;
+      confirmBtn.style.display = 'inline-block';
+    });
+
+    svg.appendChild(g);
+  });
+
+  // draw placed settlements list and circles already placed (on top)
+  intersections.forEach(iv => {
+    if(iv.occupiedBy !== null){
+      const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      dot.setAttribute('cx', iv.x);
+      dot.setAttribute('cy', iv.y);
+      dot.setAttribute('r', Math.max(7, size*0.14));
+      dot.setAttribute('fill', players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#000');
+      dot.setAttribute('stroke', '#021');
+      dot.setAttribute('stroke-width', 1.5);
+      svg.appendChild(dot);
+    }
+  });
+}
+
+/* highlight selected intersection */
+function highlightSelection(){
+  // visually indicate by adding a small overlay (we keep it simple by updating chosenInfo)
+  // main visual is confirm button and chosenInfo text
+}
+
+/* ---------- placement flow ---------- */
+function updateUI(){
+  const turnPlayerIndex = placementSequence[placementIndex];
+  const p = players[turnPlayerIndex];
+  currentTurnEl.textContent = `Player ${turnPlayerIndex+1} — ${p.name} (${p.color}) — placing settlement ${Math.floor(placementIndex/players.length)+1}`;
+  placedList.innerHTML = '';
+  players.forEach((pl,i) => {
+    const placed = intersections.filter(iv => iv.occupiedBy===i).map(x => x.id);
+    placedList.innerHTML += `<div><strong>${pl.name}</strong>: ${placed.length} (${placed.join(',')})</div>`;
+  });
+
+  // hide confirm by default
+  confirmBtn.style.display = selectedIntersection === null ? 'none' : 'inline-block';
+}
+
+confirmBtn.addEventListener('click', () => {
+  if(selectedIntersection === null) return;
+  const playerIndex = placementSequence[placementIndex];
+  placeSettlement(playerIndex, selectedIntersection);
+  // clear selection
+  selectedIntersection = null;
+  placementIndex++;
+  render();
+  updateUI();
+
+  // if finished:
+  if(placementIndex >= placementSequence.length){
+    // done - save complete placements to server final endpoint
+    fetch('/api/placements/finalize', { method:'POST' })
+      .then(()=> {
+        statusText.textContent = 'Placement complete — all players have placed their two settlements.';
+        currentTurnEl.textContent = 'Done';
+        chosenInfo.textContent = 'You can now proceed to actual game (not implemented).';
+        confirmBtn.style.display = 'none';
+      })
+      .catch(()=> {
+        statusText.textContent = 'Placement complete (local) — server finalize failed.';
+      });
+  } else {
+    // proceed to next player
+    updateUI();
+  }
+});
+
+/* ---------- load any previously saved placements from server and merge ---------- */
+async function loadPlacementsFromServer(){
+  try{
+    const res = await fetch('/api/state');
+    if(!res.ok) return;
+    const d = await res.json();
+    if(d.placements){
+      // d.placements expected as array of {player, intersection}
+      d.placements.forEach(p => {
+        if(intersections[p.intersection]) intersections[p.intersection].occupiedBy = p.player;
+      });
+    }
+  }catch(e){}
+}
+
+/* ---------- init ---------- */
+(async function init(){
+  await loadState();
+  // if we have saved placements on server, load them (so refresh preserves)
+  await loadPlacementsFromServer();
+  render();
+  updateUI();
+})();
+</script>
+</body>
+</html>

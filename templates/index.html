@@ -100,13 +100,20 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   try {
     const res = await fetch('/api/board', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ board, harbours })
     });
+
     if (!res.ok) throw new Error(await res.text());
-    alert('Saved to server');
-  } catch (e) { alert('Save failed: ' + e.message); }
+
+    // Go to players.html
+    window.location.href = "/players";
+
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
 });
+
 
 document.getElementById('loadFromServer').addEventListener('click', loadFromServer);
 document.getElementById('resetBtn').addEventListener('click', () => { board = emptyBoard(); render(); rebuildInputs(); });

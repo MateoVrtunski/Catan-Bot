@@ -1,84 +1,128 @@
-# Flask backend for Catan board editor (in-memory storage)
+# Flask backend for Catan (in-memory storage)
 from flask import Flask, render_template, jsonify, request
 
 app = Flask(__name__, template_folder='templates')
 
-# === In-memory storage ===
-saved_games = []  # list of boards (each = dict with 'board' and 'harbours')
-current_board = None
-current_harbours = None
-players = []
+# === In-memory state ===
+BOARD = []           # List of 19 tile objects
+HARBOURS = []        # List of 9 harbour objects
+PLAYERS = []         # [{name, color}, ...]
+PLACEMENTS = []      # placement records
 
-@app.route('/')
+# ========== ROUTES ==========
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-# === Board API ===
-@app.route('/api/board', methods=['GET'])
-def get_board():
-    global current_board, current_harbours
-    if current_board is None:
-        return jsonify({'error': 'no board saved'}), 404
-    return jsonify({
-        'board': current_board,
-        'harbours': current_harbours
-    })
+@app.route("/players")
+def players_page():
+    return render_template("players.html")
 
-@app.route('/api/board', methods=['POST'])
-def post_board():
-    global current_board, current_harbours, saved_games
-    try:
-        payload = request.get_json()
-        board = payload.get('board')
-        harbours = payload.get('harbours', [])
-
-        if not isinstance(board, list) or len(board) != 19:
-            return 'Board must be an array of 19 tile objects', 400
-        if not isinstance(harbours, list) or len(harbours) != 9:
-            return 'Harbours must be an array of 9 objects', 400
-
-        current_board = board
-        current_harbours = harbours
-        saved_games.append({'board': board, 'harbours': harbours})
-        return 'ok'
-    except Exception as e:
-        return str(e), 400
+@app.route("/placement")
+def placement_page():
+    return render_template("placement.html")
 
 
-# === Players API ===
-@app.route('/api/players', methods=['GET'])
-def get_players():
-    return jsonify(players)
+# ========= BOARD API =========
 
-@app.route('/api/players', methods=['POST'])
-def post_players():
-    global players
+@app.get("/api/board")
+def api_get_board():
+    if not BOARD:
+        return jsonify({"error": "no board saved"}), 404
+    return jsonify({"board": BOARD, "harbours": HARBOURS})
+
+@app.post("/api/board")
+def api_save_board():
     try:
         data = request.get_json()
-        if not isinstance(data, list):
-            return 'players must be a list', 400
-        players = data
-        return 'ok'
+        board = data.get("board")
+        harbours = data.get("harbours", [])
+
+        if not isinstance(board, list) or len(board) != 19:
+            return "Board must be an array of 19 tiles", 400
+        if not isinstance(harbours, list) or len(harbours) != 9:
+            return "Harbours must be an array of 9 objects", 400
+
+        BOARD.clear()
+        BOARD.extend(board)
+
+        HARBOURS.clear()
+        HARBOURS.extend(harbours)
+
+        return jsonify({"ok": True}), 200
+
     except Exception as e:
         return str(e), 400
 
 
-# === Start game endpoint ===
-@app.route('/api/start', methods=['POST'])
-def start_game():
-    if not players:
-        return 'no players set', 400
-    if current_board is None:
-        return 'no board set', 400
-    return jsonify({'status': 'started', 'players': players})
+# ========= PLAYERS API =========
+
+@app.get("/api/players")
+def api_get_players():
+    return jsonify(PLAYERS)
+
+@app.post("/api/players")
+def api_save_players():
+    global PLAYERS
+    data = request.get_json()
+    players_raw = data.get("players") if isinstance(data, dict) else data
+
+    if not isinstance(players_raw, list):
+        return "Invalid payload", 400
+
+    cleaned = []
+    for p in players_raw:
+        name = p.get("name")
+        color = p.get("color", "gray")
+        if name:
+            cleaned.append({"name": name, "color": color})
+
+    PLAYERS = cleaned
+    return jsonify({"ok": True, "players": PLAYERS}), 200
 
 
-# === Optional: view saved boards ===
-@app.route('/api/saved', methods=['GET'])
-def get_saved_games():
-    """Returns a list of all saved boards in this server session."""
-    return jsonify(saved_games)
+# ========= GAME STATE =========
+
+@app.get("/api/state")
+def api_state():
+    return jsonify({
+        "board": BOARD,
+        "harbours": HARBOURS,
+        "players": PLAYERS,
+        "placements": PLACEMENTS
+    })
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+# ========= PLACEMENT PHASE =========
+
+@app.post("/api/place")
+def api_place():
+    try:
+        data = request.get_json()
+        player = data.get("player")
+        intersection = data.get("intersection")
+
+        if player is None or intersection is None:
+            return "player and intersection required", 400
+
+        PLACEMENTS.append({
+            "player": int(player),
+            "intersection": int(intersection)
+        })
+
+        return jsonify({"ok": True}), 200
+
+    except Exception as e:
+        return str(e), 400
+
+
+@app.post("/api/placements/finalize")
+def api_finalize_placements():
+    return jsonify({"ok": True, "placements": PLACEMENTS}), 200
+
+
+# ==============================
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)

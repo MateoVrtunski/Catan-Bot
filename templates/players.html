@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Catan — Select Players</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <div class="app-outer">
+    <div class="app">
+
+      <div class="left panel">
+        <h1>CATAN — Players</h1>
+        <p class="small">Enter player names and select a color for each player.</p>
+
+        <form id="playersForm" style="display:flex;flex-direction:column;gap:14px;max-width:350px">
+
+          <!-- One block per player -->
+          <div class="player-row">
+            <label>Player 1</label>
+            <input type="text" name="p1" required />
+            <select name="c1">
+              <option value="red">Red</option>
+              <option value="blue">Blue</option>
+              <option value="green">Green</option>
+              <option value="yellow">Yellow</option>
+              <option value="orange">Orange</option>
+              <option value="white">White</option>
+            </select>
+          </div>
+
+          <div class="player-row">
+            <label>Player 2</label>
+            <input type="text" name="p2" required />
+            <select name="c2">
+              <option value="blue">Blue</option>
+              <option value="red">Red</option>
+              <option value="green">Green</option>
+              <option value="yellow">Yellow</option>
+              <option value="orange">Orange</option>
+              <option value="white">White</option>
+            </select>
+          </div>
+
+          <div class="player-row">
+            <label>Player 3</label>
+            <input type="text" name="p3" required />
+            <select name="c3">
+              <option value="green">Green</option>
+              <option value="red">Red</option>
+              <option value="blue">Blue</option>
+              <option value="yellow">Yellow</option>
+              <option value="orange">Orange</option>
+              <option value="white">White</option>
+            </select>
+          </div>
+
+         
+
+          <button type="submit" class="primary-btn" style="margin-top:10px">Start Game</button>
+        </form>
+
+        <div id="msg" class="small" style="margin-top:10px;color:#0a4;"></div>
+      </div>
+
+    </div>
+  </div>
+
+<style>
+.player-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.player-row label {
+  width: 80px;
+}
+.player-row input {
+  flex: 1;
+}
+</style>
+
+<script>
+document.getElementById("playersForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = new FormData(e.target);
+  const players = [];
+
+  for (let i = 1; i <= 6; i++) {
+    const name = form.get("p" + i)?.trim();
+    const color = form.get("c" + i);
+    if (name && name !== "") players.push({ name, color });
+  }
+
+  try {
+    const res = await fetch("/api/players", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(players)
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    // redirect to placement phase
+    window.location.href = "/placement";
+  }
+  catch (err) {
+    alert("Error saving players: " + err.message);
+  }
+});
+
+</script>
+
+</body>
+</html>
