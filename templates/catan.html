@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Catan — Game</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .app-outer{min-height:100vh;display:flex;align-items:flex-start;justify-content:flex-start;padding:20px;box-sizing:border-box;gap:16px}
+    .board-wrap{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:18px;border-radius:12px;flex:1;overflow:auto}
+    .controls{width:360px;display:flex;flex-direction:column;gap:10px}
+    .player-card{padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);margin-bottom:8px}
+    .small{font-size:12px;color:#9aa4b2}
+    button{padding:8px 10px;border-radius:8px;border:0;background:#60a5fa;color:#04203a;cursor:pointer}
+    .action-row{display:flex;gap:8px;align-items:center}
+  </style>
+</head>
+<body>
+  <div class="app-outer">
+    <div class="board-wrap">
+      <svg id="boardSvg" width="900" height="700" viewBox="-380 -310 760 620"></svg>
+    </div>
+
+    <div class="controls panel">
+      <strong>Players</strong>
+      <div id="playersList"></div>
+
+      <strong>Turn & Dice</strong>
+      <div class="small" id="turnInfo">loading...</div>
+      <div class="action-row">
+        <input id="diceInput" type="number" min="2" max="12" style="width:90px;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit" />
+        <button id="rollBtn">Roll / Give</button>
+      </div>
+
+      <strong>Actions</strong>
+      <div class="action-row">
+        <button id="actSettlement">Place Settlement</button>
+        <button id="actRoad">Place Road</button>
+        <button id="actCity">Build City</button>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="buyCard">Buy Dev Card</button>
+        <button id="passBtn">Pass Turn</button>
+      </div>
+
+      <div style="margin-top:10px" class="small">Click the board to perform actions when in the correct mode. Dice must be rolled at the start of each turn (or enter dice value manually then click Roll).</div>
+    </div>
+  </div>
+
+<script>
+// ---------- helpers (same math as placement/index) ----------
+function generateAxialCoordsRadius(maxRadius){
+  const coords=[];
+  for(let r=-maxRadius;r<=maxRadius;r++){
+    for(let q=-maxRadius;q<=maxRadius;q++){
+      const s=-q-r;
+      if(Math.max(Math.abs(q),Math.abs(r),Math.abs(s))<=maxRadius) coords.push({q,r});
+    }
+  }
+  return coords;
+}
+function axialToPixel(q,r,size){ const w=Math.sqrt(3)*size; const x=w*(q + r/2); const y=(3/2)*size*r; return {x,y}; }
+function polygonPoints(cx,cy,size){ const pts=[]; for(let i=0;i<6;i++){ const a=Math.PI/180*(60*i-30); pts.push(`${cx+size*Math.cos(a)},${cy+size*Math.sin(a)}`);} return pts.join(' '); }
+
+// ---------- state ----------
+let BOARD = [], HARBOURS = [], PLAYERS = [], PLACEMENTS = [], ROADS = [];
+let INTERSECTIONS = []; // computed on client too for interactions
+let hexSize = 55;
+let LAND_AXIAL = generateAxialCoordsRadius(2).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))<=2).sort((a,b)=>a.r-b.r||a.q-b.q);
+let WATER_AXIAL = generateAxialCoordsRadius(3).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))===3);
+
+let mode = null; // null | 'settlement' | 'road' | 'city'
+let turn = 0; // current player index
+let selectedIntersection = null;
+let selectedEdge = null;
+
+// DOM refs
+const svg = document.getElementById('boardSvg');
+const playersList = document.getElementById('playersList');
+const turnInfo = document.getElementById('turnInfo');
+const diceInput = document.getElementById('diceInput');
+
+async function loadState(){
+  const res = await fetch('/api/state');
+  if(!res.ok) return alert('Failed to load game state');
+  const data = await res.json();
+  BOARD = Array.isArray(data.board)?data.board:[];
+  HARBOURS = Array.isArray(data.harbours)?data.harbours:[];
+  PLAYERS = Array.isArray(data.players)?data.players:[];
+  PLACEMENTS = Array.isArray(data.placements)?data.placements:[];
+  ROADS = Array.isArray(data.roads)?data.roads:[];
+  buildIntersections();
+  draw();
+  renderPlayers();
+  renderTurnInfo();
+}
+
+// build intersections (same algorithm as placement.html)
+function buildIntersections(){
+  const size = hexSize;
+  const vertexMap = new Map();
+  LAND_AXIAL.forEach((ax,hi)=>{
+    const p = axialToPixel(ax.q,ax.r,size);
+    for(let vi=0;vi<6;vi++){
+      const angle = Math.PI/180*(60*vi-30);
+      const vx = p.x + size*Math.cos(angle);
+      const vy = p.y + size*Math.sin(angle);
+      const key = `${Math.round(vx*1000)}_${Math.round(vy*1000)}`;
+      if(!vertexMap.has(key)) vertexMap.set(key,{x:vx,y:vy,adj:new Set()});
+      vertexMap.get(key).adj.add(hi);
+    }
+  });
+  const tmp = [];
+  let id=0;
+  for(const [k,v] of vertexMap.entries()){
+    tmp.push({id:id++,x:v.x,y:v.y,adjacentHexes:Array.from(v.adj),occupiedBy:null,neighbors:[]});
+  }
+  // neighbors
+  const thr = hexSize*1.1;
+  for(let i=0;i<tmp.length;i++){
+    for(let j=0;j<tmp.length;j++){
+      if(i===j) continue;
+      const dx = tmp[i].x - tmp[j].x; const dy = tmp[i].y - tmp[j].y;
+      if(Math.sqrt(dx*dx+dy*dy) <= thr) tmp[i].neighbors.push(tmp[j].id);
+    }
+  }
+  tmp.sort((a,b)=>a.x-b.x||a.y-b.y);
+  const idMap=new Map(); tmp.forEach((t,i)=>idMap.set(t.id,i));
+  tmp.forEach((t,i)=>{ t.id = i; t.neighbors = t.neighbors.map(old => idMap.get(old)); });
+  INTERSECTIONS = tmp;
+
+  // apply PLACEMENTS to intersections
+  INTERSECTIONS.forEach(iv => iv.occupiedBy = null);
+  PLACEMENTS.forEach(p=>{
+    if(INTERSECTIONS[p.intersection]) INTERSECTIONS[p.intersection].occupiedBy = p.player;
+  });
+}
+
+// draw board and UI elements
+function draw(){
+  svg.innerHTML = '';
+  const size = hexSize;
+
+  WATER_AXIAL.forEach(ax=>{
+    const p = axialToPixel(ax.q,ax.r,size);
+    const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', polygonPoints(p.x,p.y,size));
+    poly.setAttribute('fill', '#7dd3fc');
+    poly.setAttribute('stroke','#033657'); poly.setAttribute('stroke-width','2');
+    svg.appendChild(poly);
+  });
+
+  // harbours
+  HARBOURS.forEach(h=>{
+    const p = axialToPixel(h.q,h.r,size*1.05);
+    const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circ.setAttribute('cx',p.x); circ.setAttribute('cy',p.y); circ.setAttribute('r', Math.max(8,size*0.22));
+    circ.setAttribute('fill','#f8fafc'); circ.setAttribute('stroke','#04203a'); circ.setAttribute('stroke-width','1');
+    svg.appendChild(circ);
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',p.x); t.setAttribute('y',p.y+4); t.setAttribute('text-anchor','middle'); t.setAttribute('class','harbour-label');
+    t.textContent = h.type; svg.appendChild(t);
+  });
+
+  // land tiles
+  LAND_AXIAL.forEach((ax,i)=>{
+    const p = axialToPixel(ax.q,ax.r,size);
+    const tile = BOARD[i]||{};
+    const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', polygonPoints(p.x,p.y,size));
+    poly.setAttribute('fill', tile.type ? ( { wood:'#2e8b57', brick:'#c2410c', sheep:'#9ae6b4', wheat:'#f6e05e', ore:'#94a3b8', desert:'#d6c9a8' }[tile.type] ) : '#0b1220');
+    poly.setAttribute('stroke','#071224'); poly.setAttribute('stroke-width','2');
+    svg.appendChild(poly);
+    if(tile.number){ const txt = document.createElementNS('http://www.w3.org/2000/svg','text'); txt.setAttribute('x',p.x); txt.setAttribute('y',p.y+6); txt.setAttribute('text-anchor','middle'); txt.setAttribute('class','hex-number'); txt.textContent=tile.number; svg.appendChild(txt); }
+  });
+
+  // roads
+  ROADS.forEach(r=>{
+    const a = INTERSECTIONS[r.a]; const b = INTERSECTIONS[r.b];
+    if(!a||!b) return;
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',a.x); line.setAttribute('y1',a.y); line.setAttribute('x2',b.x); line.setAttribute('y2',b.y);
+    line.setAttribute('stroke', PLAYERS[r.player] ? PLAYERS[r.player].color : '#000'); line.setAttribute('stroke-width', Math.max(4, size*0.08));
+    line.setAttribute('stroke-linecap','round');
+    svg.appendChild(line);
+  });
+
+  // intersections (settlements) and click handlers
+  INTERSECTIONS.forEach(iv=>{
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('transform', `translate(${iv.x},${iv.y})`);
+    g.style.cursor = 'pointer';
+    const c = document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('r', Math.max(6,size*0.12));
+    c.setAttribute('fill', iv.occupiedBy===null? '#eef3f7' : (PLAYERS[iv.occupiedBy] ? PLAYERS[iv.occupiedBy].color : '#000'));
+    c.setAttribute('stroke', '#04203a'); c.setAttribute('stroke-width', iv.occupiedBy===null?1:2);
+    g.appendChild(c);
+
+    if(iv.occupiedBy===null && mode==='settlement'){
+      c.setAttribute('fill','#fff'); c.setAttribute('stroke','#2ecc71'); c.setAttribute('stroke-width','2');
+    }
+
+    g.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      if(mode==='settlement'){
+        // call API to place settlement for current player
+        const playerIndex = turn;
+        const res = await fetch('/api/build/settlement', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: playerIndex, intersection: iv.id })});
+        if(!res.ok) { alert('Build failed: '+await res.text()); return; }
+        // refresh state
+        await loadState();
+      } else if(mode==='road'){
+        // for road we need to pick an adjacent neighbor — pick via simple UI:
+        // find neighbors and prompt user to choose
+        const opts = iv.neighbors || [];
+        if(opts.length===0) return;
+        const choices = opts.map(nid => `edge to ${nid}`).join('\\n');
+        const pick = prompt(`Place road from intersection ${iv.id} to which neighbor?\\n${choices}\\nEnter neighbor id:`); 
+        const nid = parseInt(pick);
+        if(isNaN(nid)) return;
+        // call API for road
+        const res2 = await fetch('/api/build/road', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: turn, a: iv.id, b: nid })});
+        if(!res2.ok) { alert('Road failed: '+await res2.text()); return; }
+        await loadState();
+      } else if(mode==='city'){
+        // upgrade settlement to city if player owns it
+        if(iv.occupiedBy!==turn) { alert('You must own that settlement to upgrade'); return; }
+        const res3 = await fetch('/api/build/city', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: turn, intersection: iv.id })});
+        if(!res3.ok) { alert('City failed: '+await res3.text()); return; }
+        await loadState();
+      } else {
+        // not in action mode -> maybe show info
+        alert(`Intersection ${iv.id} — adjacent tiles: ${iv.adjacentHexes.join(',')}`);
+      }
+    });
+
+    svg.appendChild(g);
+  });
+}
+
+// render players sidebar
+function renderPlayers(){
+  playersList.innerHTML = '';
+  PLAYERS.forEach((p, idx)=>{
+    const div = document.createElement('div'); div.className='player-card';
+    div.style.borderLeft = `8px solid ${p.color||'#777'}`;
+    const resources = (p.resources||{wood:0,brick:0,sheep:0,wheat:0,ore:0});
+    div.innerHTML = `<div><strong>${p.name} ${idx===turn? '(current)':''}</strong></div>
+      <div class="small">VP: ${p.points||0}</div>
+      <div class="small">Settlements: ${p.pieces?.settlements ?? ''} Cities: ${p.pieces?.cities ?? ''} Roads: ${p.pieces?.roads ?? ''}</div>
+      <div class="small">Wood:${resources.wood} Brick:${resources.brick} Sheep:${resources.sheep} Wheat:${resources.wheat} Ore:${resources.ore}</div>`;
+    playersList.appendChild(div);
+  });
+}
+
+// show turn info
+function renderTurnInfo(){
+  turnInfo.textContent = `Player ${turn+1}'s turn — ${PLAYERS[turn] ? PLAYERS[turn].name : ''}`;
+}
+
+// button handlers
+document.getElementById('rollBtn').addEventListener('click', async ()=>{
+  const v = parseInt(diceInput.value);
+  if(isNaN(v) || v<2 || v>12) return alert('Enter dice 2-12');
+  const res = await fetch('/api/roll', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ dice: v })});
+  if(!res.ok) { alert('Roll failed: '+await res.text()); return; }
+  // reload state to show resource changes
+  await loadState();
+  alert('Resources distributed for roll ' + v);
+});
+
+document.getElementById('actSettlement').addEventListener('click', ()=>{ mode='settlement'; alert('Click an empty highlighted intersection to place settlement'); });
+document.getElementById('actRoad').addEventListener('click', ()=>{ mode='road'; alert('Click an intersection you own (or adjacent) then choose neighbor id for road'); });
+document.getElementById('actCity').addEventListener('click', ()=>{ mode='city'; alert('Click your settlement to upgrade to city'); });
+
+document.getElementById('passBtn').addEventListener('click', async ()=>{
+  // advance turn on server if you track turn, otherwise client rotate
+  turn = (turn + 1) % PLAYERS.length;
+  await loadState();
+  renderTurnInfo();
+  alert('Turn passed — next player should roll dice.');
+});
+
+// init
+loadState();
+</script>
+</body>
+</html>

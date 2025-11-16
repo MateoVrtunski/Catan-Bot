@@ -24,20 +24,21 @@
       <div class="controls panel" style="min-width:320px">
         <div>
           <strong>Placement</strong>
-          <div class="small">Click a highlighted intersection to select it, then confirm. You will place two settlements each (round 1: player 1→N; round 2: N→1).</div>
+          <div class="small">Click a highlighted intersection to select it, then confirm. After each settlement you must place a road adjacent to it.</div>
         </div>
 
         <div style="margin-top:10px">
           <div id="currentTurn" class="small" style="font-weight:700;margin-bottom:6px"></div>
           <div id="chosenInfo" class="small" style="margin-bottom:8px"></div>
-          <button id="confirmBtn" style="display:none">Confirm placement</button>
-          <button id="finishBtn" style="display:none;margin-left:8px">Finish (skip)</button>
+          <button id="confirmBtn" style="display:none">Confirm placement (place settlement)</button>
+          <button id="cancelSelectionBtn" style="display:none;margin-left:8px">Cancel</button>
+          <button id="startGameBtn" style="display:none;margin-top:12px">Start Game</button>
         </div>
 
         <hr style="margin:12px 0">
 
         <div>
-          <strong>Placed settlements</strong>
+          <strong>Placed settlements & roads</strong>
           <div id="placedList" class="small" style="margin-top:8px"></div>
         </div>
       </div>
@@ -46,17 +47,18 @@
   </div>
 
 <script>
-
+/* -------------------- CONFIG -------------------- */
 const TILE_COLORS = {
   "wood": "#2e8b57",
   "brick": "#b22222",
   "sheep": "#9acd32",
   "wheat": "#f4e28a",
   "ore": "#808080",
-  "desert": "#e8d8a0"
+  "desert": "#e8d8a0",
+  "water": "#7dd3fc"
 };
 
-/* ---------- helper copies of hex math (must match index.html) ---------- */
+/* ---------- helper hex math (same as editor) ---------- */
 function generateAxialCoordsRadius(maxRadius){
   const coords=[];
   for(let r=-maxRadius; r<=maxRadius; r++){
@@ -70,25 +72,29 @@ function generateAxialCoordsRadius(maxRadius){
 function axialToPixel(q,r,size){ const w=Math.sqrt(3)*size; const x=w*(q + r/2); const y=(3/2)*size*r; return {x,y}; }
 function polygonPoints(cx,cy,size){const pts=[];for(let i=0;i<6;i++){const a=Math.PI/180*(60*i-30);pts.push(`${cx+size*Math.cos(a)},${cy+size*Math.sin(a)}`);}return pts.join(' ');}
 
-/* ---------- UI / state ---------- */
+/* ---------- DOM & state ---------- */
 const svg = document.getElementById('boardSvg');
 const statusText = document.getElementById('statusText');
 const currentTurnEl = document.getElementById('currentTurn');
 const chosenInfo = document.getElementById('chosenInfo');
 const confirmBtn = document.getElementById('confirmBtn');
+const cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
 const placedList = document.getElementById('placedList');
 
-let hexSize = 55; // same sensible default as the editor
-let LAND_AXIAL, WATER_AXIAL;
-let board = [];         // 19 tiles from save
-let harbours = [];      // 9 harbours from save
-let players = [];       // players array from server: [{name,color},...]
-let intersections = []; // {id,x,y,adjacentHexes:[indices],occupiedBy:playerIndex|null, neighbors:[ids]}
-let placementSequence = []; // sequence of player indices in order of placement
-let placementIndex = 0; // index into placementSequence
+let hexSize = 55;
+let LAND_AXIAL = [], WATER_AXIAL = [];
+let board = [];         // 19 tiles
+let harbours = [];      // 9 harbour objects
+let players = [];       // [{name,color},...]
+let intersections = []; // computed intersections
+let roads = [];         // local roads mirror of server
+let placementSequence = [];
+let placementIndex = 0;
 let selectedIntersection = null;
+let pendingSettlement = null; // used to place road after settlement
+let inRoadMode = false;
 
-/* ---------- fetch initial state ---------- */
+/* ---------- load state (board, players, placements, roads) ---------- */
 async function loadState(){
   try{
     const res = await fetch('/api/state');
@@ -96,33 +102,49 @@ async function loadState(){
     const data = await res.json();
 
     board = Array.isArray(data.board) && data.board.length===19 ? data.board : Array(19).fill({type:'',number:null});
-    harbours = Array.isArray(data.harbours) ? data.harbours : [];
+    harbours = Array.isArray(data.harbours) && data.harbours.length? data.harbours : [];
     players = Array.isArray(data.players) ? data.players : [];
+    roads = Array.isArray(data.roads) ? data.roads : [];
 
     if(players.length < 2) {
       statusText.textContent = 'Need at least 2 players. Go back to the players page.';
-      return;
+      return false;
     }
 
-    // compute axial lists same order as editor
     LAND_AXIAL = generateAxialCoordsRadius(2).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))<=2).sort((a,b)=> a.r - b.r || a.q - b.q);
     WATER_AXIAL = generateAxialCoordsRadius(3).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))===3);
 
     computeIntersections();
+    // merge saved placements (if any) into intersections
+    if(Array.isArray(data.placements)){
+      data.placements.forEach(p => {
+        if(intersections[p.intersection]) intersections[p.intersection].occupiedBy = p.player;
+      });
+    }
+    // merge saved roads
+    if(Array.isArray(data.roads)){
+      roads = data.roads.slice();
+    }
+
+     // save computed intersections to server
+    await fetch("/api/intersections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ intersections })
+    });
+
     buildPlacementSequence();
-    render();
-    updateUI();
-    statusText.textContent = 'Place your settlements';
+    return true;
   }catch(e){
     statusText.textContent = 'Load failed: ' + e.message;
+    return false;
   }
 }
 
-/* ---------- intersections construction ---------- */
+/* ---------- intersections ---------- */
 function computeIntersections(){
-  // compute vertices from each LAND hex and merge unique positions
   const size = hexSize;
-  const vertexMap = new Map(); // key -> {x,y,adjacentHexes:set}
+  const vertexMap = new Map();
   LAND_AXIAL.forEach((ax,hi) => {
     const p = axialToPixel(ax.q, ax.r, size);
     for(let vi=0; vi<6; vi++){
@@ -137,18 +159,15 @@ function computeIntersections(){
     }
   });
 
-  // convert to array and assign ids
-  intersections = [];
-  let id = 0;
   const temp = [];
+  let id = 0;
   for(const [k,v] of vertexMap.entries()){
-    temp.push({id: id++, x: v.x, y: v.y, adjacentHexes: Array.from(v.adjacentHexes), occupiedBy: null});
+    temp.push({id: id++, x: v.x, y: v.y, adjacentHexes: Array.from(v.adjacentHexes), occupiedBy: null, neighbors: []});
   }
 
-  // compute neighbor adjacency between intersections (distance approx equal to hex side length => size)
+  // neighbors by distance
   const threshold = hexSize * 1.1;
   for(let i=0;i<temp.length;i++){
-    temp[i].neighbors = [];
     for(let j=0;j<temp.length;j++){
       if(i===j) continue;
       const dx = temp[i].x - temp[j].x;
@@ -158,20 +177,14 @@ function computeIntersections(){
     }
   }
 
-  // store sorted by x then y to keep deterministic ids
+  // sort deterministic and reassign ids
   temp.sort((a,b)=> a.x - b.x || a.y - b.y);
-  // reassign ids to be contiguous in sorted order and update neighbors' ids mapping
-  const idMap = new Map();
-  temp.forEach((t,i)=> idMap.set(t.id, i));
-  temp.forEach((t,i)=>{
-    t.id = i;
-    t.neighbors = t.neighbors.map(old => idMap.get(old));
-  });
-
+  const idMap = new Map(); temp.forEach((t,i)=> idMap.set(t.id,i));
+  temp.forEach((t,i)=>{ t.id=i; t.neighbors = t.neighbors.map(old => idMap.get(old)); });
   intersections = temp;
 }
 
-/* ---------- build placement order: 0..N-1 then N-1..0 ---------- */
+/* ---------- placement order ---------- */
 function buildPlacementSequence(){
   const n = players.length;
   const seq = [];
@@ -181,34 +194,49 @@ function buildPlacementSequence(){
   placementIndex = 0;
 }
 
-/* ---------- utility ---------- */
+/* ---------- helpers ---------- */
 function isLegalPlace(intersection){
-  // must touch at least one land hex
   if(!intersection.adjacentHexes || intersection.adjacentHexes.length===0) return false;
-  // must be empty
   if(intersection.occupiedBy !== null) return false;
-  // neighbors must be empty
   for(const nid of intersection.neighbors || []) {
     if(intersections[nid] && intersections[nid].occupiedBy !== null) return false;
   }
   return true;
 }
 
-function placeSettlement(playerIndex, intersectionId){
-  intersections[intersectionId].occupiedBy = playerIndex;
-  // save to server
-  fetch('/api/place', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ player: playerIndex, intersection: intersectionId })
-  }).catch(()=>{ /* ignore errors for now */ });
+function edgeExists(a,b){
+  return roads.some(r => (r.a===a && r.b===b) || (r.a===b && r.b===a));
 }
 
-/* ---------- UI rendering ---------- */
+/* ---------- server save helpers ---------- */
+async function postPlacement(playerIndex, intersectionId){
+  await fetch('/api/place', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ player: playerIndex, intersection: intersectionId })
+  });
+}
+
+async function postRoad(playerIndex, a, b){
+  const res = await fetch('/api/road', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ player: playerIndex, a: a, b: b })
+  });
+  if(res.ok){
+    const j = await res.json();
+    // reflect server-side road list if returned
+    if(j && j.road) roads.push(j.road);
+  } else {
+    // still add locally for UX
+    roads.push({player: playerIndex, a, b});
+  }
+}
+
+/* ---------- UI / rendering ---------- */
 function render(){
   const size = hexSize;
   svg.innerHTML = '';
 
-  // draw water hexes
+  // water hexes (background)
   WATER_AXIAL.forEach(ax => {
     const p = axialToPixel(ax.q, ax.r, size);
     const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
@@ -219,173 +247,278 @@ function render(){
     svg.appendChild(poly);
   });
 
-  // draw land tiles
-  LAND_AXIAL.forEach((ax, i) => {
+  // harbours: draw after water so visible
+  harbours.forEach(h=>{
+    const p = axialToPixel(h.q, h.r, size * 1.05);
+    const r = Math.max(8, size * 0.22);
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('cx', p.x); circle.setAttribute('cy', p.y); circle.setAttribute('r', r);
+    circle.setAttribute('fill', '#f8fafc'); circle.setAttribute('stroke', '#04203a'); circle.setAttribute('stroke-width',1);
+    svg.appendChild(circle);
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x', p.x); txt.setAttribute('y', p.y + 4); txt.setAttribute('text-anchor','middle');
+    txt.setAttribute('class','harbour-label'); txt.textContent = h.type;
+    svg.appendChild(txt);
+  });
+
+  // land hexes
+  LAND_AXIAL.forEach((ax,i)=>{
     const p = axialToPixel(ax.q, ax.r, size);
     const t = board[i] || {type:'', number:null};
     const poly = document.createElementNS('http://www.w3.org/2000/svg','polygon');
-    poly.setAttribute('points', polygonPoints(p.x, p.y, size));
+    poly.setAttribute('points', polygonPoints(p.x,p.y,size));
     poly.setAttribute('fill', TILE_COLORS[t.type] || '#0b1220');
-    poly.setAttribute('stroke', '#071224');
-    poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke', '#071224'); poly.setAttribute('stroke-width','2');
     svg.appendChild(poly);
 
-    // number token
-    if (t.number != null && t.type !== 'desert' && t.number !== '') {
+    // token number
+    if(t.number != null && t.type !== 'desert' && t.number !== ''){
       const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
-      circ.setAttribute('cx', p.x);
-      circ.setAttribute('cy', p.y + size * 0.22);
-      circ.setAttribute('r', size * 0.36);
-      circ.setAttribute('fill', '#f6f7f9');
-      circ.setAttribute('stroke', '#071224');
-      circ.setAttribute('stroke-width', '2');
+      circ.setAttribute('cx', p.x); circ.setAttribute('cy', p.y + size * 0.22); circ.setAttribute('r', size * 0.36);
+      circ.setAttribute('fill','#f6f7f9'); circ.setAttribute('stroke','#071224'); circ.setAttribute('stroke-width','2');
       svg.appendChild(circ);
-
       const num = document.createElementNS('http://www.w3.org/2000/svg','text');
-      num.setAttribute('x', p.x);
-      num.setAttribute('y', p.y + size * 0.22 + 6);
-      num.setAttribute('text-anchor', 'middle');
-      num.setAttribute('class', 'hex-number');
-      num.textContent = t.number;
+      num.setAttribute('x', p.x); num.setAttribute('y', p.y + size * 0.22 + 6);
+      num.setAttribute('text-anchor','middle'); num.setAttribute('class','hex-number'); num.textContent = t.number;
       svg.appendChild(num);
     }
   });
 
+  // draw existing roads as colored lines (under intersections)
+  roads.forEach(r=>{
+    const a = intersections[r.a];
+    const b = intersections[r.b];
+    if(!a||!b) return;
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', a.x); line.setAttribute('y1', a.y); line.setAttribute('x2', b.x); line.setAttribute('y2', b.y);
+    line.setAttribute('stroke', players[r.player] ? players[r.player].color : '#000');
+    line.setAttribute('stroke-width', Math.max(4, hexSize*0.08));
+    line.setAttribute('stroke-linecap','round');
+    svg.appendChild(line);
+  });
+
   // draw intersections (clickable)
-  intersections.forEach((iv) => {
+  intersections.forEach((iv)=>{
     const g = document.createElementNS('http://www.w3.org/2000/svg','g');
     g.setAttribute('transform', `translate(${iv.x}, ${iv.y})`);
     g.style.cursor = 'pointer';
 
-    // base circle
+    // base circle (occupied or empty)
     const base = document.createElementNS('http://www.w3.org/2000/svg','circle');
     base.setAttribute('r', Math.max(6, size*0.12));
-    base.setAttribute('cx', 0);
-    base.setAttribute('cy', 0);
-    base.setAttribute('fill', iv.occupiedBy===null ? '#eef3f7' : (players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#999'));
-    base.setAttribute('stroke', '#04203a');
-    base.setAttribute('stroke-width', iv.occupiedBy===null ? 1 : 2);
+    base.setAttribute('cx', 0); base.setAttribute('cy', 0);
+    base.setAttribute('fill', iv.occupiedBy === null ? '#eef3f7' : (players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#999'));
+    base.setAttribute('stroke', '#04203a'); base.setAttribute('stroke-width', iv.occupiedBy===null?1:2);
     g.appendChild(base);
 
-    // if legal and empty, highlight
-    if(iv.occupiedBy===null && isLegalPlace(iv)){
-      base.setAttribute('fill', '#ffffff');
-      base.setAttribute('stroke', '#2ecc71');
-      base.setAttribute('stroke-width', 2);
+    // highlight legal placements
+    if(iv.occupiedBy===null && isLegalPlace(iv) && !inRoadMode){
+      base.setAttribute('fill', '#ffffff'); base.setAttribute('stroke','#2ecc71'); base.setAttribute('stroke-width', 2);
     }
 
-    // show small text of resources adjacent (first letters)
+    // adjacent resource letters
     if(iv.adjacentHexes && iv.adjacentHexes.length>0){
       const label = document.createElementNS('http://www.w3.org/2000/svg','text');
       label.setAttribute('x', 0); label.setAttribute('y', -Math.max(10, size*0.18));
-      label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('class', 'small');
+      label.setAttribute('text-anchor','middle'); label.setAttribute('class','small');
       const resNames = iv.adjacentHexes.map(hi => board[hi] && board[hi].type ? board[hi].type[0].toUpperCase() : '-').join(',');
       label.textContent = resNames;
       svg.appendChild(label);
     }
 
-    // click handler to select
-    g.addEventListener('click', () => {
+    // click handler
+    g.addEventListener('click', async () => {
+      if(inRoadMode){
+        // when in road mode, clicking intersections can select endpoint for edge if needed
+        // we choose only edges when clicking edge lines, not intersections here
+        return;
+      }
       if(!isLegalPlace(iv)) return;
-      // mark selection
       selectedIntersection = iv.id;
-      highlightSelection();
       chosenInfo.textContent = `Selected intersection #${iv.id} — touches tiles: ${iv.adjacentHexes.join(',')}`;
       confirmBtn.style.display = 'inline-block';
+      cancelSelectionBtn.style.display = 'inline-block';
     });
 
     svg.appendChild(g);
   });
 
-  // draw placed settlements list and circles already placed (on top)
+  // draw road highlights for pending placement (if in road mode)
+  if(inRoadMode && pendingSettlement !== null){
+    const baseId = pendingSettlement;
+    const baseIV = intersections[baseId];
+    if(baseIV){
+      // for each neighbor intersection, draw a temporary clickable edge if no road exists between them
+      baseIV.neighbors.forEach(nid => {
+        const other = intersections[nid];
+        if(!other) return;
+        if(edgeExists(baseId, nid)) return; // already road
+        // draw a highlight line
+        const edge = document.createElementNS('http://www.w3.org/2000/svg','line');
+        edge.setAttribute('x1', baseIV.x); edge.setAttribute('y1', baseIV.y);
+        edge.setAttribute('x2', other.x); edge.setAttribute('y2', other.y);
+        edge.setAttribute('stroke', players[placementSequence[placementIndex]] ? players[placementSequence[placementIndex]].color : '#2ecc71');
+        edge.setAttribute('stroke-width', Math.max(6, hexSize*0.12));
+        edge.setAttribute('stroke-linecap','round');
+        edge.setAttribute('opacity', 0.9);
+        edge.style.cursor = 'pointer';
+        // clicking this line will place the road and advance turn
+        edge.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const playerIndex = placementSequence[placementIndex];
+          await postRoad(playerIndex, baseId, nid);
+          // reflect locally
+          roads.push({player: playerIndex, a: baseId, b: nid});
+          inRoadMode = false;
+          pendingSettlement = null;
+          selectedIntersection = null;
+          placementIndex++;
+          // update intersections + UI
+          render();
+          updateUI();
+          // finalize if done
+          if(placementIndex >= placementSequence.length){
+          await finalizeAndShowStart();  // call our helper that shows the button
+          currentTurnEl.textContent = 'Done';
+          chosenInfo.textContent = 'You can now proceed to actual game.';
+        }
+
+        });
+        svg.appendChild(edge);
+      });
+    }
+  }
+
+  // draw placed settlement dots on top (again, to ensure visibility)
   intersections.forEach(iv => {
     if(iv.occupiedBy !== null){
       const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
-      dot.setAttribute('cx', iv.x);
-      dot.setAttribute('cy', iv.y);
+      dot.setAttribute('cx', iv.x); dot.setAttribute('cy', iv.y);
       dot.setAttribute('r', Math.max(7, size*0.14));
       dot.setAttribute('fill', players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#000');
-      dot.setAttribute('stroke', '#021');
-      dot.setAttribute('stroke-width', 1.5);
+      dot.setAttribute('stroke', '#021'); dot.setAttribute('stroke-width', 1.5);
       svg.appendChild(dot);
     }
   });
 }
 
-/* highlight selected intersection */
-function highlightSelection(){
-  // visually indicate by adding a small overlay (we keep it simple by updating chosenInfo)
-  // main visual is confirm button and chosenInfo text
-}
-
-/* ---------- placement flow ---------- */
+/* ---------- UI flow ---------- */
 function updateUI(){
+  if(placementIndex >= placementSequence.length){
+    currentTurnEl.textContent = 'All placements done';
+    placedList.innerHTML = players.map((pl,i)=>{
+      const placed = intersections.filter(iv => iv.occupiedBy===i).map(x => x.id);
+      const roadsPlaced = roads.filter(r=>r.player===i).map(r=>`${r.a}-${r.b}`);
+      return `<div><strong>${pl.name}</strong>: settlements ${placed.length} (${placed.join(',')}) roads (${roadsPlaced.join(',')})</div>`;
+    }).join('');
+    return;
+  }
+
   const turnPlayerIndex = placementSequence[placementIndex];
   const p = players[turnPlayerIndex];
-  currentTurnEl.textContent = `Player ${turnPlayerIndex+1} — ${p.name} (${p.color}) — placing settlement ${Math.floor(placementIndex/players.length)+1}`;
-  placedList.innerHTML = '';
-  players.forEach((pl,i) => {
+  const roundNum = Math.floor(placementIndex / players.length) + 1;
+  currentTurnEl.textContent = `Player ${turnPlayerIndex+1} — ${p.name} (${p.color}) — placing settlement ${roundNum}`;
+  placedList.innerHTML = players.map((pl,i)=>{
     const placed = intersections.filter(iv => iv.occupiedBy===i).map(x => x.id);
-    placedList.innerHTML += `<div><strong>${pl.name}</strong>: ${placed.length} (${placed.join(',')})</div>`;
-  });
-
-  // hide confirm by default
-  confirmBtn.style.display = selectedIntersection === null ? 'none' : 'inline-block';
+    const roadsPlaced = roads.filter(r=>r.player===i).map(r=>`${r.a}-${r.b}`);
+    return `<div><strong>${pl.name}</strong>: settlements ${placed.length} (${placed.join(',')}) roads (${roadsPlaced.join(',')})</div>`;
+  }).join('');
+  // controls
+  confirmBtn.style.display = (selectedIntersection !== null && !inRoadMode) ? 'inline-block' : 'none';
+  cancelSelectionBtn.style.display = (selectedIntersection !== null && !inRoadMode) ? 'inline-block' : 'none';
 }
 
-confirmBtn.addEventListener('click', () => {
+/* confirm settlement -> requires road placement next */
+confirmBtn.addEventListener('click', async () => {
   if(selectedIntersection === null) return;
   const playerIndex = placementSequence[placementIndex];
-  placeSettlement(playerIndex, selectedIntersection);
-  // clear selection
+
+  // place settlement locally & server
+  intersections[selectedIntersection].occupiedBy = playerIndex;
+  await postPlacement(playerIndex, selectedIntersection);
+
+  // now force road placement for that settlement
+  pendingSettlement = selectedIntersection;
+  inRoadMode = true;
+  chosenInfo.textContent = 'Now place a road adjacent to your settlement (click a highlighted edge).';
+  // hide confirm; road highlight will be drawn in render()
   selectedIntersection = null;
-  placementIndex++;
+  confirmBtn.style.display = 'none';
+  cancelSelectionBtn.style.display = 'none';
   render();
   updateUI();
-
-  // if finished:
-  if(placementIndex >= placementSequence.length){
-    // done - save complete placements to server final endpoint
-    fetch('/api/placements/finalize', { method:'POST' })
-      .then(()=> {
-        statusText.textContent = 'Placement complete — all players have placed their two settlements.';
-        currentTurnEl.textContent = 'Done';
-        chosenInfo.textContent = 'You can now proceed to actual game (not implemented).';
-        confirmBtn.style.display = 'none';
-      })
-      .catch(()=> {
-        statusText.textContent = 'Placement complete (local) — server finalize failed.';
-      });
-  } else {
-    // proceed to next player
-    updateUI();
-  }
 });
 
-/* ---------- load any previously saved placements from server and merge ---------- */
+cancelSelectionBtn.addEventListener('click', () => {
+  selectedIntersection = null;
+  chosenInfo.textContent = '';
+  confirmBtn.style.display = 'none';
+  cancelSelectionBtn.style.display = 'none';
+});
+
+
+// show Start Game when placement finished
+function showStartGameButton() {
+  const btn = document.getElementById('startGameBtn');
+  if (!btn) return;
+  btn.style.display = 'inline-block';
+}
+
+// call when placement finished (in the code path you already finalize)
+async function finalizeAndShowStart() {
+  await fetch('/api/placements/finalize', { method: 'POST' }).catch(()=>{});
+  document.getElementById('statusText').textContent = 'Placement complete. Ready to start the game.';
+  showStartGameButton();
+}
+
+// hook existing finalize path to show button
+// if you already call finalize in your flow, call finalizeAndShowStart() instead
+
+document.getElementById('startGameBtn').addEventListener('click', async () => {
+  const res = await fetch('/api/start_game', { method: 'POST' });
+  if (!res.ok) {
+    const text = await res.text();
+    alert('Failed to start game: ' + text);
+    return;
+  }
+  const data = await res.json();
+  console.log("Events on start:", data.events);
+  window.location.href = '/catan';
+});
+
+
+
+/* ---------- load placements & roads from server (if any) ---------- */
 async function loadPlacementsFromServer(){
   try{
     const res = await fetch('/api/state');
     if(!res.ok) return;
     const d = await res.json();
     if(d.placements){
-      // d.placements expected as array of {player, intersection}
       d.placements.forEach(p => {
         if(intersections[p.intersection]) intersections[p.intersection].occupiedBy = p.player;
       });
     }
+    if(d.roads){
+      roads = d.roads.slice();
+    }
   }catch(e){}
 }
 
+
+
 /* ---------- init ---------- */
 (async function init(){
-  await loadState();
-  // if we have saved placements on server, load them (so refresh preserves)
+  const ok = await loadState();
+  if(!ok) return;
   await loadPlacementsFromServer();
   render();
   updateUI();
+  statusText.textContent = 'Place your settlements';
 })();
+
+
+
 </script>
 </body>
 </html>
