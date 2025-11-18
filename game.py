@@ -27,6 +27,9 @@ def players_page():
 def placement_page():
     return render_template("placement.html")
 
+@app.route("/catan")
+def catan_page():
+    return render_template("catan.html")
 
 # ========= BOARD API =========
 
@@ -81,7 +84,7 @@ def api_save_players():
         name = p.get("name")
         color = p.get("color", "gray")
         if name:
-            cleaned.append({"name": name, "color": color})
+            cleaned.append(CatanGame.create_player(name, color))
 
     PLAYERS = cleaned
     return jsonify({"ok": True, "players": PLAYERS}), 200
@@ -170,9 +173,115 @@ def api_start_game():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# ---------- Game action endpoints ----------
+
+@app.post("/api/roll")
+def api_roll():
+    """Roll the dice or distribute based on provided dice value."""
+    global GAME
+    try:
+        data = request.get_json() or {}
+        dice = data.get("dice")
+        if GAME is None:
+            return jsonify({"error": "game not started"}), 400
+
+        if dice is None:
+            # random roll
+            result = GAME.roll_dice()
+            # no need to update globals because GAME modifies PLAYERS/INTERSECTIONS in place
+            return jsonify({"ok": True, "dice": result["dice"], "events": result["events"]})
+        else:
+            # manual dice -> just distribute resources for that number
+            d = int(dice)
+            events = GAME.distribute_resources(d)
+            return jsonify({"ok": True, "dice": d, "events": events})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/build/settlement")
+def api_build_settlement():
+    global GAME, INTERSECTIONS, PLACEMENTS
+    try:
+        if GAME is None:
+            return jsonify({"error": "game not started"}), 400
+        data = request.get_json() or {}
+        player = int(data.get("player"))
+        intersection = int(data.get("intersection"))
+        ok, msg = GAME.build_settlement(player, intersection)
+        if not ok:
+            return jsonify({"error": msg}), 400
+
+        # reflect back to global intersections (GAME.intersections references the same objects)
+        for iv in INTERSECTIONS:
+            if iv.get("id") == intersection or iv.get("id") is None and INTERSECTIONS.index(iv) == intersection:
+                iv["occupiedBy"] = player
+                iv["type"] = "settlement"
+                break
+
+        # record placement history (optional — keeps initial placement history too)
+        PLACEMENTS.append({"player": player, "intersection": intersection})
+
+        return jsonify({"ok": True, "message": msg}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/build/city")
+def api_build_city():
+    global GAME, INTERSECTIONS
+    try:
+        if GAME is None:
+            return jsonify({"error": "game not started"}), 400
+        data = request.get_json() or {}
+        player = int(data.get("player"))
+        intersection = int(data.get("intersection"))
+        ok, msg = GAME.build_city(player, intersection)
+        if not ok:
+            return jsonify({"error": msg}), 400
+
+        # update intersection type
+        for iv in INTERSECTIONS:
+            # handle stored ids or index
+            if iv.get("id") == intersection or (iv.get("id") is None and INTERSECTIONS.index(iv) == intersection):
+                iv["type"] = "city"
+                break
+
+        return jsonify({"ok": True, "message": msg}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/build/road")
+@app.post("/api/road")   # accept both for placement and in-game
+def api_build_road():
+    """Build a road: body {player:int, a:int, b:int}"""
+    global GAME, ROADS
+    try:
+        if GAME is None:
+            return jsonify({"error": "game not started"}), 400
+        data = request.get_json() or {}
+        player = int(data.get("player"))
+        a = int(data.get("a"))
+        b = int(data.get("b"))
+
+        ok, msg = GAME.build_road(player, a, b)
+        if not ok:
+            return jsonify({"error": msg}), 400
+
+        # append to global ROADS so /api/state shows them
+        ROADS.append({"player": player, "a": a, "b": b})
+        return jsonify({"ok": True, "road": {"player": player, "a": a, "b": b}, "message": msg}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 # ==============================
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+

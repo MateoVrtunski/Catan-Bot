@@ -172,7 +172,26 @@ function draw(){
     poly.setAttribute('fill', tile.type ? ( { wood:'#2e8b57', brick:'#c2410c', sheep:'#9ae6b4', wheat:'#f6e05e', ore:'#94a3b8', desert:'#d6c9a8' }[tile.type] ) : '#0b1220');
     poly.setAttribute('stroke','#071224'); poly.setAttribute('stroke-width','2');
     svg.appendChild(poly);
-    if(tile.number){ const txt = document.createElementNS('http://www.w3.org/2000/svg','text'); txt.setAttribute('x',p.x); txt.setAttribute('y',p.y+6); txt.setAttribute('text-anchor','middle'); txt.setAttribute('class','hex-number'); txt.textContent=tile.number; svg.appendChild(txt); }
+    if(tile.number){
+    const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circ.setAttribute('cx', p.x);
+    circ.setAttribute('cy', p.y + size * 0.22);
+    circ.setAttribute('r', size * 0.36);
+    circ.setAttribute('fill', '#f6f7f9');
+    circ.setAttribute('stroke', '#071224');
+    circ.setAttribute('stroke-width', '2');
+    circ.setAttribute('class', 'hex-token-circle');
+    svg.appendChild(circ);
+
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x', p.x);
+    txt.setAttribute('y', p.y + size * 0.22 + 6);
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('class', 'hex-number');
+    txt.textContent = tile.number;
+    svg.appendChild(txt);
+    }
+
   });
 
   // roads

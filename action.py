@@ -211,17 +211,48 @@ class CatanGame:
     # ====================================================================
     #  Initial Resource Distribution
     # ====================================================================
-    def distribute_initial_resources(self):
-        """Give starting resources to players based on second settlement placements"""
+    def distribute_initial_resources(self, placements=None):
+        """
+        Give starting resources to players based on their second settlement placement.
+        `placements` is the server-side PLACEMENTS list in chronological order:
+          [{player:int, intersection:int}, ...]
+        We determine the last placement per player and give resources for that intersection.
+        """
         events = []
-        for iv in self.intersections:
-            p_index = iv.get("occupiedBy")
-            if p_index is not None and iv.get("type") == "settlement":
-                player = self.players[p_index]
-                for hi in iv.get("adjacentHexes", []):
-                    tile = self.board[hi]
-                    res = tile.get("type")
-                    if res != "desert":
-                        player["resources"][res] += 1
-                        events.append(f"{player['name']} receives 1 {res}")
+        if not placements:
+            # If no placement history provided, fallback to scanning intersections (safe)
+            for iv in self.intersections:
+                p_index = iv.get("occupiedBy")
+                if p_index is not None and iv.get("type") == "settlement":
+                    player = self.players[p_index]
+                    for hi in iv.get("adjacentHexes", []):
+                        tile = self.board[hi]
+                        res = tile.get("type")
+                        if res != "desert":
+                            player["resources"][res] += 1
+                            events.append(f"{player['name']} receives 1 {res}")
+            return events
+
+        # compute last placement (most recent) per player
+        last_by_player = {}
+        for rec in placements:
+            p = int(rec.get("player"))
+            inter = int(rec.get("intersection"))
+            last_by_player[p] = inter
+
+        # give resources for each player's last placement intersection
+        for p_index, inter_id in last_by_player.items():
+            # validate intersection exists
+            if inter_id < 0 or inter_id >= len(self.intersections):
+                continue
+            iv = self.intersections[inter_id]
+            # only give from settlements (not cities); placements are settlements
+            for hi in iv.get("adjacentHexes", []):
+                tile = self.board[hi]
+                res = tile.get("type")
+                if res != "desert":
+                    self.players[p_index]["resources"][res] += 1
+                    events.append(f"{self.players[p_index]['name']} receives 1 {res}")
+
         return events
+ 
