@@ -5,7 +5,7 @@ import random
 #  Catan Game State
 # ====================================================================
 class CatanGame:
-    def __init__(self, board, harbours, players, intersections):
+    def __init__(self, board, harbours, players, intersections, roads, placements):
         """
         board: list of 19 hex tiles {type, number}
         harbours: list of 9 harbour objects
@@ -17,8 +17,8 @@ class CatanGame:
         self.harbours = harbours
         self.players = players
         self.intersections = intersections
-        self.roads = []  # {player, a, b}
-
+        self.roads = roads  # {player, a, b}
+        self.placements = placements
         self.COSTS = {
             "road": {"wood": 1, "brick": 1},
             "settlement": {"wood": 1, "brick": 1, "sheep": 1, "wheat": 1},
@@ -48,7 +48,7 @@ class CatanGame:
             "settlements_left": 3,
             "cities_left": 4,
             "roads_left": 13,
-            "victory_points": 0,
+            "victory_points": 2,
             "dev_cards": [],
             "harbours": []
         }
@@ -211,48 +211,37 @@ class CatanGame:
     # ====================================================================
     #  Initial Resource Distribution
     # ====================================================================
-    def distribute_initial_resources(self, placements=None):
+    def distribute_initial_resources(self, placements):
         """
-        Give starting resources to players based on their second settlement placement.
-        `placements` is the server-side PLACEMENTS list in chronological order:
-          [{player:int, intersection:int}, ...]
-        We determine the last placement per player and give resources for that intersection.
+        Give starting resources ONLY from each player's second settlement.
+        placements = [{player:int, intersection:int}, ...] in chronological order
         """
-        events = []
-        if not placements:
-            # If no placement history provided, fallback to scanning intersections (safe)
-            for iv in self.intersections:
-                p_index = iv.get("occupiedBy")
-                if p_index is not None and iv.get("type") == "settlement":
-                    player = self.players[p_index]
-                    for hi in iv.get("adjacentHexes", []):
-                        tile = self.board[hi]
-                        res = tile.get("type")
-                        if res != "desert":
-                            player["resources"][res] += 1
-                            events.append(f"{player['name']} receives 1 {res}")
-            return events
 
-        # compute last placement (most recent) per player
+        events = []
+
+        if not placements:
+            return events  # do nothing if somehow empty
+
+        # Determine the last (2nd) settlement for each player
         last_by_player = {}
         for rec in placements:
             p = int(rec.get("player"))
             inter = int(rec.get("intersection"))
             last_by_player[p] = inter
 
-        # give resources for each player's last placement intersection
+        # Give resources from the last settlement only
         for p_index, inter_id in last_by_player.items():
-            # validate intersection exists
             if inter_id < 0 or inter_id >= len(self.intersections):
                 continue
+
             iv = self.intersections[inter_id]
-            # only give from settlements (not cities); placements are settlements
+
             for hi in iv.get("adjacentHexes", []):
                 tile = self.board[hi]
                 res = tile.get("type")
                 if res != "desert":
                     self.players[p_index]["resources"][res] += 1
                     events.append(f"{self.players[p_index]['name']} receives 1 {res}")
-
         return events
+
  

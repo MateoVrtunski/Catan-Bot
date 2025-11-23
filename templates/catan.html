@@ -9,8 +9,20 @@
     .app-outer{min-height:100vh;display:flex;align-items:flex-start;justify-content:flex-start;padding:20px;box-sizing:border-box;gap:16px}
     .board-wrap{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:18px;border-radius:12px;flex:1;overflow:auto}
     .controls{width:360px;display:flex;flex-direction:column;gap:10px}
-    .player-card{padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);margin-bottom:8px}
-    .small{font-size:12px;color:#9aa4b2}
+    .player-card{
+      padding:14px;
+      border-radius:10px;
+      background:rgba(255,255,255,0.06);
+      margin-bottom:12px;
+      font-size:15px;
+      line-height:1.4;
+    }
+
+    .small{
+      font-size:14px;
+      color:#cfd8e3;
+    }
+
     button{padding:8px 10px;border-radius:8px;border:0;background:#60a5fa;color:#04203a;cursor:pointer}
     .action-row{display:flex;gap:8px;align-items:center}
   </style>
@@ -97,6 +109,7 @@ async function loadState(){
 }
 
 // build intersections (same algorithm as placement.html)
+// build intersections (same algorithm as placement.html)
 function buildIntersections(){
   const size = hexSize;
   const vertexMap = new Map();
@@ -114,7 +127,7 @@ function buildIntersections(){
   const tmp = [];
   let id=0;
   for(const [k,v] of vertexMap.entries()){
-    tmp.push({id:id++,x:v.x,y:v.y,adjacentHexes:Array.from(v.adj),occupiedBy:null,neighbors:[]});
+    tmp.push({id:id++,x:v.x,y:v.y,adjacentHexes:Array.from(v.adj),occupiedBy:null,building:null,neighbors:[]});
   }
   // neighbors
   const thr = hexSize*1.1;
@@ -130,10 +143,15 @@ function buildIntersections(){
   tmp.forEach((t,i)=>{ t.id = i; t.neighbors = t.neighbors.map(old => idMap.get(old)); });
   INTERSECTIONS = tmp;
 
-  // apply PLACEMENTS to intersections
-  INTERSECTIONS.forEach(iv => iv.occupiedBy = null);
+  // apply PLACEMENTS to intersections — set occupiedBy AND building (settlement/city)
+  INTERSECTIONS.forEach(iv => { iv.occupiedBy = null; iv.building = null; });
   PLACEMENTS.forEach(p=>{
-    if(INTERSECTIONS[p.intersection]) INTERSECTIONS[p.intersection].occupiedBy = p.player;
+    const idx = Number(p.intersection);
+    if(Number.isFinite(idx) && INTERSECTIONS[idx]){
+      INTERSECTIONS[idx].occupiedBy = Number(p.player);
+      // prefer explicit type if present, otherwise assume 'settlement'
+      INTERSECTIONS[idx].building = p.type || 'settlement';
+    }
   });
 }
 
@@ -206,18 +224,49 @@ function draw(){
   });
 
   // intersections (settlements) and click handlers
+  // intersections (settlements / cities) and click handlers
   INTERSECTIONS.forEach(iv=>{
-    const g = document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('transform', `translate(${iv.x},${iv.y})`);
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('transform', `translate(${iv.x},${iv.y})`);
     g.style.cursor = 'pointer';
-    const c = document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('r', Math.max(6,size*0.12));
-    c.setAttribute('fill', iv.occupiedBy===null? '#eef3f7' : (PLAYERS[iv.occupiedBy] ? PLAYERS[iv.occupiedBy].color : '#000'));
-    c.setAttribute('stroke', '#04203a'); c.setAttribute('stroke-width', iv.occupiedBy===null?1:2);
-    g.appendChild(c);
 
-    if(iv.occupiedBy===null && mode==='settlement'){
-      c.setAttribute('fill','#fff'); c.setAttribute('stroke','#2ecc71'); c.setAttribute('stroke-width','2');
+    let shape;
+    if (iv.occupiedBy !== null && iv.building === "city") {
+      // CITY → 5-point star polygon
+      shape = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      const R = Math.max(12, hexSize * 0.28);
+      const r = R * 0.45;
+      let pts = "";
+      for (let i = 0; i < 10; i++) {
+        const angle = Math.PI / 180 * (i * 36 - 90);
+        const rad = i % 2 === 0 ? R : r;
+        pts += (Math.cos(angle) * rad) + "," + (Math.sin(angle) * rad) + " ";
+      }
+      shape.setAttribute("points", pts.trim());
+    } else {
+      // SETTLEMENT → circle
+      shape = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      shape.setAttribute("r", Math.max(6, hexSize * 0.12));
     }
 
+    shape.setAttribute(
+      "fill",
+      iv.occupiedBy === null
+        ? "#eef3f7"
+        : (PLAYERS[iv.occupiedBy]?.color || "#000")
+    );
+    shape.setAttribute("stroke", "#04203a");
+    shape.setAttribute("stroke-width", iv.occupiedBy === null ? 1 : 2);
+    g.appendChild(shape);
+
+    // highlight legal placements (use 'shape' not 'c')
+    if(iv.occupiedBy === null && mode === 'settlement' && isLegalPlace(iv)){
+      shape.setAttribute('fill','#fff');
+      shape.setAttribute('stroke','#2ecc71');
+      shape.setAttribute('stroke-width','2');
+    }
+
+    // click handler
     g.addEventListener('click', async (e)=>{
       e.stopPropagation();
       if(mode==='settlement'){
@@ -228,31 +277,26 @@ function draw(){
         // refresh state
         await loadState();
       } else if(mode==='road'){
-        // for road we need to pick an adjacent neighbor — pick via simple UI:
-        // find neighbors and prompt user to choose
         const opts = iv.neighbors || [];
         if(opts.length===0) return;
         const choices = opts.map(nid => `edge to ${nid}`).join('\\n');
         const pick = prompt(`Place road from intersection ${iv.id} to which neighbor?\\n${choices}\\nEnter neighbor id:`); 
         const nid = parseInt(pick);
         if(isNaN(nid)) return;
-        // call API for road
         const res2 = await fetch('/api/build/road', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: turn, a: iv.id, b: nid })});
         if(!res2.ok) { alert('Road failed: '+await res2.text()); return; }
         await loadState();
       } else if(mode==='city'){
-        // upgrade settlement to city if player owns it
         if(iv.occupiedBy!==turn) { alert('You must own that settlement to upgrade'); return; }
         const res3 = await fetch('/api/build/city', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: turn, intersection: iv.id })});
         if(!res3.ok) { alert('City failed: '+await res3.text()); return; }
         await loadState();
       } else {
-        // not in action mode -> maybe show info
         alert(`Intersection ${iv.id} — adjacent tiles: ${iv.adjacentHexes.join(',')}`);
       }
     });
 
-    svg.appendChild(g);
+  svg.appendChild(g);
   });
 }
 
@@ -264,8 +308,8 @@ function renderPlayers(){
     div.style.borderLeft = `8px solid ${p.color||'#777'}`;
     const resources = (p.resources||{wood:0,brick:0,sheep:0,wheat:0,ore:0});
     div.innerHTML = `<div><strong>${p.name} ${idx===turn? '(current)':''}</strong></div>
-      <div class="small">VP: ${p.points||0}</div>
-      <div class="small">Settlements: ${p.pieces?.settlements ?? ''} Cities: ${p.pieces?.cities ?? ''} Roads: ${p.pieces?.roads ?? ''}</div>
+      <div class="small">VP: ${p.victory_points || 0}</div>
+      <div class="small">Settlements: ${p.settlements_left} &nbsp; Cities: ${p.cities_left} &nbsp; Roads: ${p.roads_left}</div>
       <div class="small">Wood:${resources.wood} Brick:${resources.brick} Sheep:${resources.sheep} Wheat:${resources.wheat} Ore:${resources.ore}</div>`;
     playersList.appendChild(div);
   });
