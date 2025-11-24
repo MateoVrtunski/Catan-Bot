@@ -99,7 +99,8 @@ def api_state():
         "harbours": HARBOURS,
         "players": PLAYERS,
         "placements": PLACEMENTS,
-        "roads": ROADS
+        "roads": ROADS,
+        "intersection": INTERSECTIONS
     })
 
 
