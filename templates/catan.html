@@ -103,6 +103,7 @@ async function loadState(){
   PLACEMENTS = Array.isArray(data.placements)?data.placements:[];
   ROADS = Array.isArray(data.roads)?data.roads:[];
   buildIntersections();
+  assignHarborsToIntersections();
   draw();
   renderPlayers();
   renderTurnInfo();
@@ -127,7 +128,7 @@ function buildIntersections(){
   const tmp = [];
   let id=0;
   for(const [k,v] of vertexMap.entries()){
-    tmp.push({id:id++,x:v.x,y:v.y,adjacentHexes:Array.from(v.adj),occupiedBy:null,building:null,neighbors:[]});
+    tmp.push({id:id++,x:v.x,y:v.y,adjacentHexes:Array.from(v.adj),occupiedBy:"None",building:null,neighbors:[]});
   }
   // neighbors
   const thr = hexSize*1.1;
@@ -144,17 +145,37 @@ function buildIntersections(){
   INTERSECTIONS = tmp;
 
   // apply PLACEMENTS to intersections — set occupiedBy AND building (settlement/city)
-  INTERSECTIONS.forEach(iv => { iv.occupiedBy = null; iv.building = null; });
+  INTERSECTIONS.forEach(iv => { iv.occupiedBy = "None"; iv.building = null; });
   PLACEMENTS.forEach(p=>{
     const idx = Number(p.intersection);
     if(Number.isFinite(idx) && INTERSECTIONS[idx]){
-      INTERSECTIONS[idx].occupiedBy = Number(p.player);
+      INTERSECTIONS[idx].occupiedBy = p.player.toString();
       // prefer explicit type if present, otherwise assume 'settlement'
       INTERSECTIONS[idx].building = p.type || 'settlement';
     }
   });
 }
 
+function assignHarborsToIntersections() {
+    const harborMap = {
+        "ore": [2,4],
+        "wheat": [3,5],
+        "wood": [27,35],
+        "brick": [32,24],
+        "sheep": [52,53],
+        "3:1": [10,17,6,12,46,51,49,43]
+    };
+
+    INTERSECTIONS.forEach(iv => iv.harbor = null);
+
+    for (const [type, ids] of Object.entries(harborMap)) {
+        ids.forEach(id => {
+            if (INTERSECTIONS[id]) {
+                INTERSECTIONS[id].harbor = type;
+            }
+        });
+    }
+}
 // draw board and UI elements
 function draw(){
   svg.innerHTML = '';
@@ -231,7 +252,7 @@ function draw(){
     g.style.cursor = 'pointer';
 
     let shape;
-    if (iv.occupiedBy !== null && iv.building === "city") {
+    if (iv.occupiedBy !== "None" && iv.building === "city") {
       // CITY → 5-point star polygon
       shape = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
       const R = Math.max(12, hexSize * 0.28);
@@ -251,16 +272,16 @@ function draw(){
 
     shape.setAttribute(
       "fill",
-      iv.occupiedBy === null
+      iv.occupiedBy === "None"
         ? "#eef3f7"
         : (PLAYERS[iv.occupiedBy]?.color || "#000")
     );
     shape.setAttribute("stroke", "#04203a");
-    shape.setAttribute("stroke-width", iv.occupiedBy === null ? 1 : 2);
+    shape.setAttribute("stroke-width", iv.occupiedBy === "None" ? 1 : 2);
     g.appendChild(shape);
 
     // highlight legal placements (use 'shape' not 'c')
-    if(iv.occupiedBy === null && mode === 'settlement' && isLegalPlace(iv)){
+    if(iv.occupiedBy === "None" && mode === 'settlement' && isLegalPlace(iv)){
       shape.setAttribute('fill','#fff');
       shape.setAttribute('stroke','#2ecc71');
       shape.setAttribute('stroke-width','2');

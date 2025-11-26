@@ -115,6 +115,7 @@ async function loadState(){
     WATER_AXIAL = generateAxialCoordsRadius(3).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))===3);
 
     computeIntersections();
+    assignHarborsToIntersections();
     // merge saved placements (if any) into intersections
     if(Array.isArray(data.placements)){
       data.placements.forEach(p => {
@@ -162,7 +163,7 @@ function computeIntersections(){
   const temp = [];
   let id = 0;
   for(const [k,v] of vertexMap.entries()){
-    temp.push({id: id++, x: v.x, y: v.y, adjacentHexes: Array.from(v.adjacentHexes), occupiedBy: null, neighbors: []});
+    temp.push({id: id++, x: v.x, y: v.y, adjacentHexes: Array.from(v.adjacentHexes), occupiedBy: "None", neighbors: []});
   }
 
   // neighbors by distance
@@ -184,6 +185,25 @@ function computeIntersections(){
   intersections = temp;
 }
 
+function assignHarborsToIntersections() {
+    const harborMap = {
+        "ore": [2,4],
+        "wheat": [3,5],
+        "wood": [27,35],
+        "brick": [32,24],
+        "sheep": [52,53],
+        "3:1": [10,17,6,12,46,51,49,43]
+    };
+
+    intersections.forEach(iv => iv.harbor = null);
+
+    for (const [type, ids] of Object.entries(harborMap)) {
+        ids.forEach(id => {
+            if (intersections[id]) intersections[id].harbor = type;
+        });
+    }
+}
+
 /* ---------- placement order ---------- */
 function buildPlacementSequence(){
   const n = players.length;
@@ -197,9 +217,9 @@ function buildPlacementSequence(){
 /* ---------- helpers ---------- */
 function isLegalPlace(intersection){
   if(!intersection.adjacentHexes || intersection.adjacentHexes.length===0) return false;
-  if(intersection.occupiedBy !== null) return false;
+  if(intersection.occupiedBy !== "None") return false;
   for(const nid of intersection.neighbors || []) {
-    if(intersections[nid] && intersections[nid].occupiedBy !== null) return false;
+    if(intersections[nid] && intersections[nid].occupiedBy !== "None") return false;
   }
   return true;
 }
@@ -307,12 +327,12 @@ function render(){
     const base = document.createElementNS('http://www.w3.org/2000/svg','circle');
     base.setAttribute('r', Math.max(6, size*0.12));
     base.setAttribute('cx', 0); base.setAttribute('cy', 0);
-    base.setAttribute('fill', iv.occupiedBy === null ? '#eef3f7' : (players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#999'));
-    base.setAttribute('stroke', '#04203a'); base.setAttribute('stroke-width', iv.occupiedBy===null?1:2);
+    base.setAttribute('fill', iv.occupiedBy === "None" ? '#eef3f7' : (players[iv.occupiedBy] ? players[iv.occupiedBy].color : '#999'));
+    base.setAttribute('stroke', '#04203a'); base.setAttribute('stroke-width', iv.occupiedBy==="None"?1:2);
     g.appendChild(base);
 
     // highlight legal placements
-    if(iv.occupiedBy===null && isLegalPlace(iv) && !inRoadMode){
+    if(iv.occupiedBy==="None" && isLegalPlace(iv) && !inRoadMode){
       base.setAttribute('fill', '#ffffff'); base.setAttribute('stroke','#2ecc71'); base.setAttribute('stroke-width', 2);
     }
 
@@ -391,7 +411,7 @@ function render(){
 
   // draw placed settlement dots on top (again, to ensure visibility)
   intersections.forEach(iv => {
-    if(iv.occupiedBy !== null){
+    if(iv.occupiedBy !== "None"){
       const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
       dot.setAttribute('cx', iv.x); dot.setAttribute('cy', iv.y);
       dot.setAttribute('r', Math.max(7, size*0.14));
@@ -434,7 +454,7 @@ confirmBtn.addEventListener('click', async () => {
   const playerIndex = placementSequence[placementIndex];
 
   // place settlement locally & server
-  intersections[selectedIntersection].occupiedBy = playerIndex;
+  intersections[selectedIntersection].occupiedBy = playerIndex.toString();
   await postPlacement(playerIndex, selectedIntersection);
 
   // now force road placement for that settlement
