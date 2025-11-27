@@ -1,11 +1,55 @@
 import data
 
-strategy = ["city", "settlment", "cards"]
+
+import pulp as pl
+
+# Create LP problem: choose Maximize or Minimize
+prob = pl.LpProblem("City_Optimized_Weights", pl.LpMaximize)
+
+# Decision variables = resource weights
+a = pl.LpVariable("ore",   lowBound=0, upBound=10)
+b = pl.LpVariable("wheat", lowBound=0, upBound=10)
+c = pl.LpVariable("sheep", lowBound=0, upBound=10)
+d = pl.LpVariable("wood",  lowBound=0, upBound=10)
+e = pl.LpVariable("brick", lowBound=0, upBound=10)
+
+λ = 0.2  # penalty for ignoring other resources
+
+# Objective = prioritize city resources but not insanely
+prob += 3*a + 2*b - c - d - e, "City_Strategy_Objective"
+
+# Priority structure
+
+prob += 5*d + 5*e + 5*c >= 4*a + 7*b
+prob += 4*a + 7*b >= 5*c + 4*d + 4*e
+prob += 5*a >= 5.5*b
+prob += 5*c >= 2*d + 2*e
+prob += d == e
+
+
+prob.solve()
+
+print("Status:", pl.LpStatus[prob.status])
+print("---- Resulting weights ----")
+print("ore =", a.value())
+print("wheat =", b.value())
+print("sheep =", c.value())
+print("wood =", d.value())
+print("brick =", e.value())
 
 i = data.inter
-b = data.board
+bo = data.board
 i2 = data.inter2
 
+
+
+strategy = {
+                "wheat": b.value(),
+                "ore": a.value(),
+                "wood": d.value(),
+                "sheep": c.value(),
+                "brick": e.value()
+            }
 
 def look_at_board(board):
 
@@ -37,13 +81,8 @@ def look_at_board(board):
 
 
 
-def first_two_settlements(intersections, board):
-    weight_ore = 12
-    weight_wheat = 11
-    weight_sheep = 6
-    weight_brick = 9
-    weight_wood = 9
-
+def first_two_settlements(strategy, intersections, board):
+     
     result = []
 
     # -----------------------------------------
@@ -116,16 +155,10 @@ def first_two_settlements(intersections, board):
                 num_score = 0
 
             # type weight
-            type_score = {
-                "wheat": weight_wheat,
-                "ore": weight_ore,
-                "wood": weight_wood,
-                "sheep": weight_sheep,
-                "brick": weight_brick
-            }[tile["type"]]
+            weight = strategy[tile["type"]]
 
             # final tile score
-            scores.append(type_score * num_score)
+            scores.append(weight * num_score)
 
         best.append(sum(scores))
 
@@ -138,6 +171,4 @@ def first_two_settlements(intersections, board):
 
 
 
-
-
-print(look_at_board(b))
+print(first_two_settlements(strategy, i, bo))
