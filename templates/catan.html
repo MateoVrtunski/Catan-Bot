@@ -166,7 +166,7 @@ function assignHarborsToIntersections() {
         "3:1": [10,17,6,12,46,51,49,43]
     };
 
-    INTERSECTIONS.forEach(iv => iv.harbor = null);
+    INTERSECTIONS.forEach(iv => iv.harbor = "None");
 
     for (const [type, ids] of Object.entries(harborMap)) {
         ids.forEach(id => {

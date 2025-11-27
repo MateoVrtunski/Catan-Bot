@@ -1,6 +1,4 @@
 import data
-
-
 import pulp as pl
 
 # Create LP problem: choose Maximize or Minimize
@@ -13,7 +11,6 @@ c = pl.LpVariable("sheep", lowBound=0, upBound=10)
 d = pl.LpVariable("wood",  lowBound=0, upBound=10)
 e = pl.LpVariable("brick", lowBound=0, upBound=10)
 
-λ = 0.2  # penalty for ignoring other resources
 
 # Objective = prioritize city resources but not insanely
 prob += 3*a + 2*b - c - d - e, "City_Strategy_Objective"
@@ -40,6 +37,7 @@ print("brick =", e.value())
 i = data.inter
 bo = data.board
 i2 = data.inter2
+second = data.second
 
 
 
@@ -81,94 +79,106 @@ def look_at_board(board):
 
 
 
-def first_two_settlements(strategy, intersections, board):
-     
-    result = []
+def first_two_settlements(strategy, intersections, board, player=None):
+   
+    local_strategy = dict(strategy)
 
-    # -----------------------------------------
-    # BUILD TILE-LIST FOR EACH INTERSECTION
-    # -----------------------------------------
+    # --- If the player already has a settlement, reduce weights for resources
+    #     adjacent to that settlement by 2 (to encourage complementary 2nd placement)
+    if player is not None:
+        # find settlements owned by this player (type == 'settlement')
+        owned_settlements = [
+            iv for iv in intersections
+            if iv.get("occupiedBy") == player and iv.get("type") == "settlement"
+        ]
+        if len(owned_settlements) >= 1:
+            # use the first found settlement (no placement order tracked here)
+            first_iv = owned_settlements[0]
+            for hi in first_iv.get("adjacentHexes", []):
+                if 0 <= hi < len(board):
+                    tile = board[hi]
+                    if tile and tile.get("type") in local_strategy:
+                        local_strategy[tile["type"]] = local_strategy.get(tile["type"], 0) - 2
+
+    # --- Build tile lists for each intersection (max 3 tiles; pad with None)
+    intersection_tiles = []
     for iv in intersections:
-
-        # NEW RULE: if occupied, zero value
-        if iv.get("occupiedBy") is not None:
-            result.append([None, None, None])
+        # if occupied or blocked by adjacent occupied → mark as unusable
+        if iv.get("occupiedBy") is not "None":
+            intersection_tiles.append([None, None, None])
             continue
 
         blocked = False
         for nid in iv.get("neighbors", []):
-            if 0 <= nid < len(intersections) and intersections[nid].get("occupiedBy") is not None:
+            if 0 <= nid < len(intersections) and intersections[nid].get("occupiedBy") is not "None":
                 blocked = True
                 break
-
         if blocked:
-            result.append([None, None, None])
+            intersection_tiles.append([None, None, None])
             continue
 
         adj = iv.get("adjacentHexes", [])
         tiles = []
-
-        # add existing adjacent hex tiles
-        for hex_index in adj[:3]:  # take at most 3
+        for hex_index in adj[:3]:
             if 0 <= hex_index < len(board):
                 tiles.append(board[hex_index])
             else:
                 tiles.append(None)
-
-        # if fewer than 3, pad with None
         while len(tiles) < 3:
             tiles.append(None)
 
-        result.append(tiles)
+        # If this intersection has a harbour (harbor / harbour) and the harbour value
+        # is not the string "None", we'll treat missing tiles as a small harbor bonus.
+        has_harbour = False
+        hv = iv.get("harbor", iv.get("harbour", None))
+        if hv is not None and hv != "None":
+            has_harbour = True
 
-    # -----------------------------------------
-    # SCORE EACH INTERSECTION
-    # -----------------------------------------
-    best = []
+        if has_harbour:
+            # replace None placeholders with a small special object to signal a harbour-bonus
+            tiles = [t if t is not None else {"type": None, "number": 2, "harbour_bonus": True} for t in tiles]
 
-    for i in range(len(result)):
-        tiles = result[i]
-        scores = []  # store tile scores
+        intersection_tiles.append(tiles)
 
-        # if occupied → we already forced [None,None,None]
+    # --- Score each intersection ---
+    scores = []
+    for tiles in intersection_tiles:
         if tiles == [None, None, None]:
-            best.append(0)
+            scores.append(0)
             continue
 
+        total = 0
         for tile in tiles:
-            if tile is None or tile["type"] == "desert":
-                scores.append(0)
+            # harbour-bonus placeholder -> add fixed bonus (tunable)
+            if tile is not None and tile.get("harbour_bonus"):
+                total += 15   # <--- harbour bonus value (you can tune this)
                 continue
 
-            # number weight
-            if tile["number"] in (2, 12):
-                num_score = 1
-            elif tile["number"] in (3, 11):
-                num_score = 2
-            elif tile["number"] in (4, 10):
-                num_score = 3
-            elif tile["number"] in (5, 9):
-                num_score = 4
-            elif tile["number"] in (6, 8):
-                num_score = 5
-            else:
-                num_score = 0
+            if tile is None or tile.get("type") == "desert":
+                continue
 
-            # type weight
-            weight = strategy[tile["type"]]
+            num = tile.get("number")
+            typ = tile.get("type")
 
-            # final tile score
-            scores.append(weight * num_score)
+            # production frequency weight (same mapping you already used)
+            if num in (2, 12): num_score = 1
+            elif num in (3, 11): num_score = 2
+            elif num in (4, 10): num_score = 3
+            elif num in (5, 9): num_score = 4
+            elif num in (6, 8): num_score = 5
+            else: num_score = 0
 
-        best.append(sum(scores))
+            type_weight = local_strategy.get(typ, 0)
+            total += type_weight * num_score
 
-    # -----------------------------------------
-    # PICK HIGHEST-SCORING INDEX
-    # -----------------------------------------
-    winner = max(range(len(best)), key=lambda i: best[i])
+        scores.append(total)
 
-    return winner
+    # --- choose highest score index (ties -> first max)
+    if not scores:
+        return 0
+    winner = max(range(len(scores)), key=lambda i: scores[i])
+    return winner, scores
 
 
 
-print(first_two_settlements(strategy, i, bo))
+print(first_two_settlements(strategy, second, bo, 3))
