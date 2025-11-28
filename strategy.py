@@ -26,13 +26,6 @@ prob += d == e
 
 prob.solve()
 
-print("Status:", pl.LpStatus[prob.status])
-print("---- Resulting weights ----")
-print("ore =", a.value())
-print("wheat =", b.value())
-print("sheep =", c.value())
-print("wood =", d.value())
-print("brick =", e.value())
 
 i = data.inter
 bo = data.board
@@ -104,15 +97,20 @@ def first_two_settlements(strategy, intersections, board, player=None):
     intersection_tiles = []
     for iv in intersections:
         # if occupied or blocked by adjacent occupied → mark as unusable
-        if iv.get("occupiedBy") is not "None":
+        occ = iv.get("occupiedBy")
+        if occ not in (None, "None"):
             intersection_tiles.append([None, None, None])
             continue
 
+
         blocked = False
         for nid in iv.get("neighbors", []):
-            if 0 <= nid < len(intersections) and intersections[nid].get("occupiedBy") is not "None":
-                blocked = True
-                break
+            if 0 <= nid < len(intersections):
+                occ_n = intersections[nid].get("occupiedBy")
+                if occ_n not in (None, "None"):
+                    blocked = True
+                    break
+
         if blocked:
             intersection_tiles.append([None, None, None])
             continue
@@ -129,38 +127,36 @@ def first_two_settlements(strategy, intersections, board, player=None):
 
         # If this intersection has a harbour (harbor / harbour) and the harbour value
         # is not the string "None", we'll treat missing tiles as a small harbor bonus.
-        has_harbour = False
-        hv = iv.get("harbor", iv.get("harbour", None))
-        if hv is not None and hv != "None":
-            has_harbour = True
-
-        if has_harbour:
-            # replace None placeholders with a small special object to signal a harbour-bonus
-            tiles = [t if t is not None else {"type": None, "number": 2, "harbour_bonus": True} for t in tiles]
 
         intersection_tiles.append(tiles)
 
     # --- Score each intersection ---
+    # --- Score each intersection ---
     scores = []
-    for tiles in intersection_tiles:
+    for idx, tiles in enumerate(intersection_tiles):
+
+        # unusable intersection
         if tiles == [None, None, None]:
             scores.append(0)
             continue
 
         total = 0
-        for tile in tiles:
-            # harbour-bonus placeholder -> add fixed bonus (tunable)
-            if tile is not None and tile.get("harbour_bonus"):
-                total += 15   # <--- harbour bonus value (you can tune this)
-                continue
 
+        # FIXED harbor bonus (+20)
+        iv = intersections[idx]
+        hv = iv.get("harbor", iv.get("harbour", None))
+        if hv is not None and hv != "None":
+            total += 15
+
+        # score all real tiles
+        for tile in tiles:
             if tile is None or tile.get("type") == "desert":
                 continue
 
             num = tile.get("number")
             typ = tile.get("type")
 
-            # production frequency weight (same mapping you already used)
+            # number probabilities
             if num in (2, 12): num_score = 1
             elif num in (3, 11): num_score = 2
             elif num in (4, 10): num_score = 3
@@ -173,12 +169,45 @@ def first_two_settlements(strategy, intersections, board, player=None):
 
         scores.append(total)
 
+
     # --- choose highest score index (ties -> first max)
     if not scores:
         return 0
     winner = max(range(len(scores)), key=lambda i: scores[i])
-    return winner, scores
 
 
+        # --------------------------------------------------
+    # ROAD DECISION:
+    # Pick the best intersection two steps away
+    # --------------------------------------------------
 
-print(first_two_settlements(strategy, second, bo, 3))
+    # winner is already defined above
+    start = winner
+
+    candidate_intersections = set()
+
+    # neighbors of winner
+    for n1 in intersections[start].get("neighbors", []):
+        # neighbors of neighbor → distance 2
+        for n2 in intersections[n1].get("neighbors", []):
+            # exclude the winner itself and direct neighbors
+            if n2 != start and n2 not in intersections[start].get("neighbors", []):
+                candidate_intersections.add(n2)
+
+    # remove invalid indices
+    candidate_intersections = [
+        c for c in candidate_intersections
+        if 0 <= c < len(intersections)
+    ]
+
+    # if no valid candidates → fallback
+    if not candidate_intersections:
+        road_target = None
+    else:
+        # choose the best-scoring among distance-2 intersections
+        road_target = max(candidate_intersections, key=lambda c: scores[c])
+
+
+    return winner, road_target
+
+print(first_two_settlements(strategy, data.test,bo,0))

@@ -34,6 +34,12 @@
           <button id="cancelSelectionBtn" style="display:none;margin-left:8px">Cancel</button>
           <button id="startGameBtn" style="display:none;margin-top:12px">Start Game</button>
         </div>
+        <div style="margin-top:10px">
+          <label class="small" for="decisionPlayerInput">Decision for player:</label>
+          <input id="decisionPlayerInput" type="number" min="0" style="width:80px;padding:6px;border-radius:6px;border:1px solid rgba(0,0,0,0.1);margin-left:8px" placeholder="player id" />
+          <button id="decisionBtn" style="margin-left:8px">Get decision</button>
+          <div id="decisionResult" class="small" style="margin-top:6px"></div>
+        </div>
 
         <hr style="margin:12px 0">
 
@@ -474,6 +480,101 @@ cancelSelectionBtn.addEventListener('click', () => {
   chosenInfo.textContent = '';
   confirmBtn.style.display = 'none';
   cancelSelectionBtn.style.display = 'none';
+});
+
+/* ---------- Decision API (call server strategy and render) ---------- */
+
+function clearDecisionOverlay(){
+  const old = document.getElementById('decisionOverlay');
+  if(old) old.remove();
+}
+
+function renderDecisionOverlay(settlementIdx, roadIdx){
+  clearDecisionOverlay();
+  if(settlementIdx == null && roadIdx == null) return;
+
+  const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.setAttribute('id','decisionOverlay');
+
+  // find intersection objects (safe search by id)
+  function findIV(idx){
+    return intersections.find(iv => Number(iv.id) === Number(idx) || iv.id === idx) || null;
+  }
+
+  const sIV = findIV(settlementIdx);
+  if(sIV){
+    // highlight settlement choice with a yellow halo
+    const halo = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    halo.setAttribute('cx', sIV.x);
+    halo.setAttribute('cy', sIV.y);
+    halo.setAttribute('r', Math.max(10, hexSize*0.22));
+    halo.setAttribute('fill', 'none');
+    halo.setAttribute('stroke', '#ffdd57');
+    halo.setAttribute('stroke-width', 3);
+    halo.setAttribute('stroke-linecap','round');
+    halo.setAttribute('stroke-dasharray','6,4');
+    g.appendChild(halo);
+  }
+
+  const rIV = findIV(roadIdx);
+  if(rIV && sIV){
+    // draw a line from settlement to road target
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', sIV.x); line.setAttribute('y1', sIV.y);
+    line.setAttribute('x2', rIV.x); line.setAttribute('y2', rIV.y);
+    line.setAttribute('stroke', '#ffdd57');
+    line.setAttribute('stroke-width', Math.max(4, hexSize*0.08));
+    line.setAttribute('stroke-linecap','round');
+    line.setAttribute('opacity','0.95');
+    line.setAttribute('stroke-dasharray','8,4');
+    g.appendChild(line);
+
+    // also place a small marker on the road target
+    const dot = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    dot.setAttribute('cx', rIV.x); dot.setAttribute('cy', rIV.y);
+    dot.setAttribute('r', Math.max(6, hexSize*0.12));
+    dot.setAttribute('fill', '#ffdd57');
+    dot.setAttribute('stroke', '#6b3d00');
+    dot.setAttribute('stroke-width', 1.5);
+    g.appendChild(dot);
+  }
+
+  svg.appendChild(g);
+}
+
+// click handler for decision button
+document.getElementById('decisionBtn').addEventListener('click', async () => {
+  const v = document.getElementById('decisionPlayerInput').value;
+  if(v === '') return alert('Enter player id (0,1,...)');
+  const pid = parseInt(v);
+  if(isNaN(pid)) return alert('Invalid player id');
+
+  // call server endpoint
+  try {
+    const res = await fetch(`/api/decision?player=${pid}`);
+    if(!res.ok){
+      const text = await res.text();
+      return alert('Decision failed: ' + text);
+    }
+    const j = await res.json();
+    if(!j.ok){
+      return alert('Decision error: ' + (j.error || JSON.stringify(j)));
+    }
+
+    // show text result and draw overlay
+    const s = j.settlement;
+    const r = j.road;
+    document.getElementById('decisionResult').textContent = `Settlement → ${s}    Road → ${r === null || r === undefined ? 'none' : r}`;
+    renderDecisionOverlay(s, r);
+
+    // scroll board into view if needed
+    const boardWrap = document.getElementById('boardWrap');
+    if(boardWrap) boardWrap.scrollTop = 0;
+
+  } catch (err) {
+    alert('Decision error: ' + err.message);
+    console.error(err);
+  }
 });
 
 

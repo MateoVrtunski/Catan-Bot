@@ -1,6 +1,7 @@
 # Flask backend for Catan (in-memory storage)
 from flask import Flask, render_template, jsonify, request
 from action import CatanGame
+from strategy import first_two_settlements, strategy as STRATEGY
 
 GAME = None
 
@@ -105,6 +106,55 @@ def api_state():
 
 
 # ========= PLACEMENT PHASE =========
+@app.get("/api/decision")
+def api_decision():
+    """
+    Return decision for initial placement for a given player.
+    Query param: player (int)
+    Calls strategy.first_two_settlements(strategy, INTERSECTIONS, BOARD, player)
+    Returns JSON: {"ok": True, "settlement": <idx>, "road": <idx|null>, "error": <msg?>}
+    """
+    global BOARD, INTERSECTIONS
+    if first_two_settlements is None:
+        return jsonify({"ok": False, "error": "strategy module or function not available on server"}), 500
+
+    player = request.args.get("player", None)
+    if player is None:
+        return jsonify({"ok": False, "error": "player query parameter required"}), 400
+
+    try:
+        player_id = int(player)
+    except Exception:
+        return jsonify({"ok": False, "error": "player must be an integer"}), 400
+
+    # Defensive: ensure we have board and intersections
+    if not isinstance(BOARD, list) or not isinstance(INTERSECTIONS, list):
+        return jsonify({"ok": False, "error": "server board or intersections not ready"}), 500
+
+    # Call the strategy function. We pass STRATEGY dict (if available) and the server lists.
+    try:
+        # strategy function signature expected: (strategy, intersections, board, player=None)
+        result = first_two_settlements(STRATEGY, INTERSECTIONS, BOARD, player=player_id)
+        # result expected as (settlement_idx, road_idx) or similar
+        if isinstance(result, tuple) or isinstance(result, list):
+            settlement_idx = result[0]
+            road_idx = result[1] if len(result) > 1 else None
+        else:
+            # allow functions that return dict
+            settlement_idx = result.get("settlement") if isinstance(result, dict) else None
+            road_idx = result.get("road") if isinstance(result, dict) else None
+
+        print("=== DEBUG ===")
+        print("PLAYER:", player_id)
+        print("BOARD FROM SERVER:", BOARD)
+        print("INTERSECTIONS FROM SERVER:", INTERSECTIONS[:5], "... total =", len(INTERSECTIONS))
+        print("STRATEGY:", STRATEGY)
+        print("=== END DEBUG ===")
+        
+        return jsonify({"ok": True, "settlement": settlement_idx, "road": road_idx})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.post("/api/place")
 def api_place():
