@@ -71,7 +71,6 @@ class CatanGame:
     #  Dice & Resource Distribution
     # ====================================================================
     def distribute_resources(self, dice_number):
-        """Distribute resources to all players based on dice number"""
         if dice_number == 7:
             return []  # robber logic not implemented yet
 
@@ -86,19 +85,46 @@ class CatanGame:
                 for iv in self.intersections:
                     if hex_index in iv.get("adjacentHexes", []):
                         p_index = iv.get("occupiedBy")
-                        if p_index is not None:
-                            player = self.players[p_index]
-                            amount = 2 if iv.get("type") == "city" else 1
-                            player["resources"][res] += amount
-                            events.append(f"{player['name']} receives {amount} {res}")
-        return events
 
-    def roll_dice(self):
-        d = random.randint(1, 6) + random.randint(1, 6)
-        self.logs.append(f"Dice rolled: {d}")
-        events = [] if d == 7 else self.distribute_resources(d)
-        self.logs.extend(events)
-        return {"dice": d, "events": events}
+                        # --- normalize occupiedBy ---
+                        if p_index is None:
+                            continue
+                        # handle string "None"/"" etc
+                        if isinstance(p_index, str):
+                            p_str = p_index.strip()
+                            if p_str == "" or p_str.lower() == "None":
+                                continue
+                            # try to convert numeric string -> int
+                            try:
+                                p_index = int(p_str)
+                            except ValueError:
+                                # not a usable index
+                                continue
+
+                        # ensure we now have an integer index
+                        try:
+                            p_index = int(p_index)
+                        except Exception:
+                            continue
+
+                        # bounds check
+                        if p_index < 0 or p_index >= len(self.players):
+                            continue
+
+                        player = self.players[p_index]
+
+                        # detect city: some places store it in iv['type'], some in iv['building']
+                        is_city = (iv.get("type") == "city") or (iv.get("building") == "city")
+
+                        amount = 2 if is_city else 1
+
+                        # ensure player has resources dict entry for this resource
+                        if res not in player.get("resources", {}):
+                            player.setdefault("resources", {}).setdefault(res, 0)
+
+                        player["resources"][res] += amount
+                        events.append(f"{player['name']} receives {amount} {res}")
+        return events
 
     # ====================================================================
     #  Resource & Cost Helpers

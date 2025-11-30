@@ -267,22 +267,27 @@ def api_roll():
     try:
         data = request.get_json() or {}
         dice = data.get("dice")
+
         if GAME is None:
             return jsonify({"error": "game not started"}), 400
 
-        if dice is None:
-            # random roll
-            result = GAME.roll_dice()
-            # no need to update globals because GAME modifies PLAYERS/INTERSECTIONS in place
-            return jsonify({"ok": True, "dice": result["dice"], "events": result["events"]})
-        else:
-            # manual dice -> just distribute resources for that number
-            d = int(dice)
-            events = GAME.distribute_resources(d)
-            return jsonify({"ok": True, "dice": d, "events": events})
+        if isinstance(dice, str):
+            dice = dice.strip()
+            if not dice.isdigit():
+                return jsonify({"error": "Dice must be an integer 2–12"}), 400
+
+        d = int(dice)
+
+        if d < 2 or d > 12:
+            return jsonify({"error": "Dice must be between 2 and 12"}), 400
+
+        events = GAME.distribute_resources(d)
+        return jsonify({"ok": True, "dice": d, "events": events})
+
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 
 @app.post("/api/build/settlement")

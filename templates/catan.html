@@ -102,81 +102,15 @@ async function loadState(){
   PLAYERS = Array.isArray(data.players)?data.players:[];
   PLACEMENTS = Array.isArray(data.placements)?data.placements:[];
   ROADS = Array.isArray(data.roads)?data.roads:[];
-  buildIntersections();
-  assignHarborsToIntersections();
+  INTERSECTIONS = Array.isArray(data.intersection)?data.intersection:[];
+ 
   draw();
   renderPlayers();
   renderTurnInfo();
 }
 
-// build intersections (same algorithm as placement.html)
-// build intersections (same algorithm as placement.html)
-function buildIntersections(){
-  const size = hexSize;
-  const vertexMap = new Map();
-  LAND_AXIAL.forEach((ax,hi)=>{
-    const p = axialToPixel(ax.q,ax.r,size);
-    for(let vi=0;vi<6;vi++){
-      const angle = Math.PI/180*(60*vi-30);
-      const vx = p.x + size*Math.cos(angle);
-      const vy = p.y + size*Math.sin(angle);
-      const key = `${Math.round(vx*1000)}_${Math.round(vy*1000)}`;
-      if(!vertexMap.has(key)) vertexMap.set(key,{x:vx,y:vy,adj:new Set()});
-      vertexMap.get(key).adj.add(hi);
-    }
-  });
-  const tmp = [];
-  let id=0;
-  for(const [k,v] of vertexMap.entries()){
-    tmp.push({id:id++,x:v.x,y:v.y,adjacentHexes:Array.from(v.adj),occupiedBy:"None",building:null,neighbors:[]});
-  }
-  // neighbors
-  const thr = hexSize*1.1;
-  for(let i=0;i<tmp.length;i++){
-    for(let j=0;j<tmp.length;j++){
-      if(i===j) continue;
-      const dx = tmp[i].x - tmp[j].x; const dy = tmp[i].y - tmp[j].y;
-      if(Math.sqrt(dx*dx+dy*dy) <= thr) tmp[i].neighbors.push(tmp[j].id);
-    }
-  }
-  tmp.sort((a,b)=>a.x-b.x||a.y-b.y);
-  const idMap=new Map(); tmp.forEach((t,i)=>idMap.set(t.id,i));
-  tmp.forEach((t,i)=>{ t.id = i; t.neighbors = t.neighbors.map(old => idMap.get(old)); });
-  INTERSECTIONS = tmp;
 
-  // apply PLACEMENTS to intersections — set occupiedBy AND building (settlement/city)
-  INTERSECTIONS.forEach(iv => { iv.occupiedBy = "None"; iv.building = null; });
-  PLACEMENTS.forEach(p=>{
-    const idx = Number(p.intersection);
-    if(Number.isFinite(idx) && INTERSECTIONS[idx]){
-      INTERSECTIONS[idx].occupiedBy = p.player.toString();
-      // prefer explicit type if present, otherwise assume 'settlement'
-      INTERSECTIONS[idx].building = p.type || 'settlement';
-    }
-  });
-}
 
-function assignHarborsToIntersections() {
-    const harborMap = {
-        "ore": [2,4],
-        "wheat": [3,5],
-        "wood": [27,35],
-        "brick": [32,24],
-        "sheep": [52,53],
-        "3:1": [10,17,6,12,46,51,49,43]
-    };
-
-    INTERSECTIONS.forEach(iv => iv.harbor = "None");
-
-    for (const [type, ids] of Object.entries(harborMap)) {
-        ids.forEach(id => {
-            if (INTERSECTIONS[id]) {
-                INTERSECTIONS[id].harbor = type;
-            }
-        });
-    }
-}
-// draw board and UI elements
 function draw(){
   svg.innerHTML = '';
   const size = hexSize;

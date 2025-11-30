@@ -142,7 +142,6 @@ def first_two_settlements(strategy, intersections, board, player=None):
 
         total = 0
 
-        # FIXED harbor bonus (+20)
         iv = intersections[idx]
         hv = iv.get("harbor", iv.get("harbour", None))
         if hv is not None and hv != "None":
