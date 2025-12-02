@@ -215,7 +215,7 @@ def first_two_settlements(strategy, intersections, board, player=None):
 import math
 from copy import deepcopy
 
-def in_game_start(players, player_id, intersections, roads, board, strategy_weights=None):
+def in_game_start2(players, player_id, intersections, roads, board, strategy_weights=None):
     """
     Decide an in-game action for player `player_id`.
 
@@ -511,4 +511,104 @@ players=data.players_in_game
 intersections = data.int_in_game
 roads = data.roads_in_game
 
-print(in_game_start(players, 0, intersections, roads, bo, strategy_weights=None))
+
+
+city_cost = {"wheat": 2, "ore": 3}
+settlement_cost ={"wheat":1, "sheep":1, "wood":1,"brick":1}
+card_cost = {"wheat":1, "ore":1, "sheep":1}
+road_cost = {"brick":1, "wood":1}
+
+def can_afford(player, cost):
+   
+    resources = player.get("resources", {})
+
+    for res, amount in cost.items():
+        if resources.get(res, 0) < amount:
+            return False
+    return True
+
+def settlement_possible(player_id, roads, intersections):
+    """
+    Returns a list of all intersections where the player can legally build a settlement.
+    """
+
+    # --- Build player's road graph ---
+    road_graph = {i["id"]: set() for i in intersections}
+
+    for r in roads:
+        if r["player"] == player_id:
+            a, b = r["a"], r["b"]
+            road_graph[a].add(b)
+            road_graph[b].add(a)
+
+    possible = []
+
+    # --- Check every intersection ---
+    for iv in intersections:
+        iv_id = iv["id"]
+
+        # 1) Must be empty
+        if iv.get("occupiedBy") not in (None, "None"):
+            continue
+
+        # 2) Must have NO occupied neighbors (distance rule)
+        blocked = False
+        for n in iv["neighbors"]:
+            occ = intersections[n].get("occupiedBy")
+            if occ not in (None, "None"):
+                blocked = True
+                break
+        if blocked:
+            continue
+
+        # 3) Must be reachable through player's roads
+        # -> at least one neighbor must be connected to player's road graph
+        connected_count = 0
+        for n in iv["neighbors"]:
+            if n in road_graph and road_graph[n]:
+                connected_count += 1
+
+        # Must have **2 connecting roads** (player's road chain reaches this point)
+        if connected_count < 1:
+            continue
+
+        # 4) Must NOT have a road leading into an enemy settlement
+        #    (no placing a settlement "behind" an opponent)
+        illegal = False
+        for r in roads:
+            a, b = r["a"], r["b"]
+            if iv_id in (a, b):
+                other = a if b == iv_id else b
+                occ = intersections[other].get("occupiedBy")
+                if occ not in (None, "None") and occ != player_id:
+                    illegal = True
+                    break
+        if illegal:
+            continue
+
+        # If all checks pass:
+        possible.append(iv_id)
+
+    return possible
+
+print(settlement_possible(1,roads,intersections))
+
+
+
+def in_game_start(players, player_id, intersections, roads, board):
+
+    player = players[player_id]
+
+    city_cost = {"wheat": 2, "ore": 3}
+    settlement_cost ={"wheat":1, "sheep":1, "wood":1,"brick":1}
+    card_cost = {"wheat":1, "ore":1, "sheep":1}
+    road_cost = {"brick":1, "wood":1}
+
+    if can_afford(players, city_cost) == True and player["settlment_left"] < 5:
+        strategy = "city"
+        return 0
+
+    #elif can_afford(players, settlement_cost) == True and player["settlment_left"] > 0: and settlment_possible(player, roads, intersections) == True:
+        #startegy = "settlment"
+    
+    
