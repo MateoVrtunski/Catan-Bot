@@ -4265,10 +4265,10 @@ players_in_game = [
       "harbours": [],
       "name": "red",
       "resources": {
-        "brick": 0,
-        "ore": 0,
+        "brick": 1,
+        "ore": 3,
         "sheep": 1,
-        "wheat": 0,
+        "wheat": 1,
         "wood": 0
       },
       "roads_left": 12,

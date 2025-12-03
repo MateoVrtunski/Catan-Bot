@@ -79,20 +79,29 @@ def first_two_settlements(strategy, intersections, board, player=None):
     # --- If the player already has a settlement, reduce weights for resources
     #     adjacent to that settlement by 2 (to encourage complementary 2nd placement)
     if player is not None:
-        # find settlements owned by this player (type == 'settlement')
         owned_settlements = [
-            iv for iv in intersections
-            if iv.get("occupiedBy") == player and iv.get("type") == "settlement"
+        iv for iv in intersections
+        if iv.get("occupiedBy") == player and iv.get("type") == "settlement"
         ]
-        if len(owned_settlements) >= 1:
-            # use the first found settlement (no placement order tracked here)
-            first_iv = owned_settlements[0]
-            for hi in first_iv.get("adjacentHexes", []):
-                if 0 <= hi < len(board):
-                    tile = board[hi]
-                    if tile and tile.get("type") in local_strategy:
-                        local_strategy[tile["type"]] = local_strategy.get(tile["type"], 0) - 2
+    
+    if len(owned_settlements) >= 1:
+        first_iv = owned_settlements[0]
 
+        for hi in first_iv.get("adjacentHexes", []):
+            if 0 <= hi < len(board):
+                tile = board[hi]
+                if tile and tile.get("type") in local_strategy:
+
+                    # --- determine probability (based on tile number)
+                    num = tile.get("number")
+                    if num is not None and 2 <= num <= 12:
+                        p = (6 - abs(num - 7)) / 36   # probability of rolling this number
+                    else:
+                        p = 0
+
+                    # --- subtract 3/4 * probability * 36 = 27 * p
+                    penalty = 27 * p
+                    local_strategy[tile["type"]] = (local_strategy.get(tile["type"], 0) - penalty)
     # --- Build tile lists for each intersection (max 3 tiles; pad with None)
     intersection_tiles = []
     for iv in intersections:
@@ -527,88 +536,183 @@ def can_afford(player, cost):
             return False
     return True
 
-def settlement_possible(player_id, roads, intersections):
+def settlement_possible(player_id, roads, intersections, board):
     """
-    Returns a list of all intersections where the player can legally build a settlement.
+    Returns (True, best_location) if a settlement can be placed,
+    where best_location is chosen by highest adjacent tile probability
+    plus harbour bonus.
+    Otherwise returns (False, None).
     """
 
-    # --- Build player's road graph ---
-    road_graph = {i["id"]: set() for i in intersections}
+    # --- helper: probability of a number token
+    def tile_probability(number):
+        if number is None or number < 2 or number > 12:
+            return 0
+        return (6 - abs(number - 7)) / 36   # normal Catan distribution
 
-    for r in roads:
-        if r["player"] == player_id:
-            a, b = r["a"], r["b"]
-            road_graph[a].add(b)
-            road_graph[b].add(a)
+    # harbour value: acts like number 4 or 10 = 3/36
+    HARBOUR_VALUE = 3 / 36
 
-    possible = []
+    # collect player's road endpoints
+    player_edges = [(r["a"], r["b"]) for r in roads if r["player"] == player_id]
 
-    # --- Check every intersection ---
-    for iv in intersections:
-        iv_id = iv["id"]
+    if not player_edges:
+        return False, None
 
-        # 1) Must be empty
-        if iv.get("occupiedBy") not in (None, "None"):
-            continue
+    # adjacency map of player's own road network
+    adjacency = {}
+    for a, b in player_edges:
+        adjacency.setdefault(a, set()).add(b)
+        adjacency.setdefault(b, set()).add(a)
 
-        # 2) Must have NO occupied neighbors (distance rule)
-        blocked = False
-        for n in iv["neighbors"]:
-            occ = intersections[n].get("occupiedBy")
-            if occ not in (None, "None"):
-                blocked = True
-                break
-        if blocked:
-            continue
+    possible_locations = []
 
-        # 3) Must be reachable through player's roads
-        # -> at least one neighbor must be connected to player's road graph
-        connected_count = 0
-        for n in iv["neighbors"]:
-            if n in road_graph and road_graph[n]:
-                connected_count += 1
+    # examine each endpoint of each road
+    for a, b in player_edges:
+        for node in (a, b):
 
-        # Must have **2 connecting roads** (player's road chain reaches this point)
-        if connected_count < 1:
-            continue
+            I = intersections[node]
 
-        # 4) Must NOT have a road leading into an enemy settlement
-        #    (no placing a settlement "behind" an opponent)
-        illegal = False
-        for r in roads:
-            a, b = r["a"], r["b"]
-            if iv_id in (a, b):
-                other = a if b == iv_id else b
-                occ = intersections[other].get("occupiedBy")
-                if occ not in (None, "None") and occ != player_id:
-                    illegal = True
+            # occupied?
+            if I["occupiedBy"] != "None":
+                continue
+
+            # distance rule: neighbors must be empty
+            blocked = False
+            for n in I["neighbors"]:
+                if intersections[n]["occupiedBy"] != "None":
+                    blocked = True
                     break
-        if illegal:
-            continue
+            if blocked:
+                continue
 
-        # If all checks pass:
-        possible.append(iv_id)
+            # needs at least 2 connected roads
+            if len(adjacency[node]) < 2:
+                continue
 
-    return possible
+            # valid placement → score it
+            score = 0
 
-print(settlement_possible(1,roads,intersections))
+            # sum adjacent tile probabilities
+            for hi in I.get("adjacentHexes", []):
+                if 0 <= hi < len(board):
+                    tile = board[hi]
+                    if tile:
+                        score += tile_probability(tile.get("number"))
 
+            # harbour bonus (adjust field name if different)
+            if I.get("harbor") not in (None, "None"):
+                score += HARBOUR_VALUE
+
+            possible_locations.append((score, node))
+
+    # no valid locations
+    if not possible_locations:
+        return False, None
+
+    # pick location with highest score
+    possible_locations.sort(reverse=True)  # highest score first
+    best_score, best_node = possible_locations[0]
+
+    return True, best_node
+
+
+def city_placement(player_id, intersections, board):
+    """
+    Returns the intersection (settlement position) with the highest
+    total probability of its adjacent hexes, for upgrading to a city.
+    """
+
+    # --- helper: probability of a number token
+    def tile_probability(number):
+        if number is None or number < 2 or number > 12:
+            return 0
+        return (6 - abs(number - 7)) / 36    # standard Catan distribution
+
+    best_score = -1
+    best_intersection = None
+
+    for iv in intersections:
+        # check if this is the player's settlement
+        if iv.get("occupiedBy") == player_id and iv.get("type") == "settlement":
+            
+            total_prob = 0
+            
+            # sum probabilities of adjacent tiles
+            for hi in iv.get("adjacentHexes", []):
+                if 0 <= hi < len(board):
+                    tile = board[hi]
+                    if tile is not None:
+                        num = tile.get("number")
+                        total_prob += tile_probability(num)
+
+            # check if this is the highest score so far
+            if total_prob > best_score:
+                best_score = total_prob
+                best_intersection = iv.get("id")
+
+    return best_intersection
 
 
 def in_game_start(players, player_id, intersections, roads, board):
 
     player = players[player_id]
+    resources = player["resources"]
 
     city_cost = {"wheat": 2, "ore": 3}
     settlement_cost ={"wheat":1, "sheep":1, "wood":1,"brick":1}
     card_cost = {"wheat":1, "ore":1, "sheep":1}
     road_cost = {"brick":1, "wood":1}
 
-    if can_afford(players, city_cost) == True and player["settlment_left"] < 5:
-        strategy = "city"
-        return 0
+    t,set_loc = settlement_possible(player_id, roads, intersections, board)
+    city_loc = city_placement(player_id,intersections, board)
 
-    #elif can_afford(players, settlement_cost) == True and player["settlment_left"] > 0: and settlment_possible(player, roads, intersections) == True:
-        #startegy = "settlment"
+    def compute_missing_and_extra(cost):
+        missing = {}
+        extra = {}
+
+        for res, amount_needed in cost.items():
+            have = resources.get(res, 0)
+            if have < amount_needed:
+                missing[res] = amount_needed - have
+
+        for res, have in resources.items():
+            spare = have - cost.get(res, 0)
+            if spare > 0:
+                extra[res] = spare
+
+        return missing, extra
+
+    strategy_1 = {}
+    trad = {"i_need": None, "i_give": None}
+
+    if can_afford(player, city_cost) == True and player["settlements_left"] < 5:
+        strategy_1 = {"city": city_loc}
+        trad = {"i_need":None, "i_give": None}
+        return strategy_1, trad
+    
+    missing_city, extra_city = compute_missing_and_extra(city_cost)
+    if player["settlements_left"] < 5 and len(missing_city) == 1 and len(extra_city) > 0:
+        strategy_1 = {"city": city_loc}
+        trad = {"i_need": missing_city, "i_give": extra_city}
+        return strategy_1, trad
+
+    if can_afford(player, settlement_cost) == True and player["settlements_left"] > 0 and t == True:
+        strategy_1 = {"settlement": set_loc}
+        trad = {"i_need":None, "i_give": None}
+        return strategy_1, trad
+    
+    missing_set, extra_set = compute_missing_and_extra(settlement_cost)
+    if player["settlements_left"] > 0 and t and len(missing_set) == 1 and len(extra_set) > 0:
+        strategy_1 = {"settlement": set_loc}
+        trad = {"i_need": missing_set, "i_give": extra_set}
+        return strategy_1, trad
+    
+    return None
+
+print(in_game_start(players,0,intersections,roads,bo))
+    
+
+    
     
     
