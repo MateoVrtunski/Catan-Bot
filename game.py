@@ -288,6 +288,18 @@ def api_roll():
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.post("/api/set_resources")
+def api_set_resources():
+    data = request.get_json()
+    pid = int(data["player"])
+    res = data["resources"]
+
+    p = PLAYERS[pid]
+    for k in ["wood","brick","sheep","wheat","ore"]:
+        p["resources"][k] = max(0, int(res.get(k,0)))
+
+    return jsonify({"ok": True, "player": p})
+
 
 
 @app.post("/api/build/settlement")

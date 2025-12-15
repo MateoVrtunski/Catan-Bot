@@ -57,6 +57,26 @@
       </div>
 
       <div style="margin-top:10px" class="small">Click the board to perform actions when in the correct mode. Dice must be rolled at the start of each turn (or enter dice value manually then click Roll).</div>
+      <hr style="margin:12px 0">
+
+      <strong>Admin: Edit Resources</strong>
+      <div class="small">Fix mistakes by setting or adjusting player resources.</div>
+
+      <div class="action-row" style="margin-top:6px">
+        <select id="resPlayer" style="flex:1;padding:6px;border-radius:6px">
+        </select>
+      </div>
+
+      <div id="resEditor" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:8px">
+        <!-- inputs injected by JS -->
+      </div>
+
+      <div class="action-row" style="margin-top:8px">
+        <button id="resSetBtn">Set</button>
+      </div>
+
+      <div id="resMsg" class="small"></div>
+
     </div>
   </div>
 
@@ -107,6 +127,7 @@ async function loadState(){
   draw();
   renderPlayers();
   renderTurnInfo();
+  initResourceEditor();
 }
 
 
@@ -186,6 +207,16 @@ function draw(){
     g.style.cursor = 'pointer';
 
     let shape;
+
+    // intersection id label
+    const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('y', -10);
+    label.setAttribute('text-anchor','middle');
+    label.setAttribute('font-size','10');
+    label.setAttribute('fill','#111');
+    label.textContent = iv.id;
+    g.appendChild(label);
+
     if (iv.occupiedBy !== "None" && iv.building === "city") {
       // CITY → 5-point star polygon
       shape = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
@@ -297,6 +328,78 @@ document.getElementById('passBtn').addEventListener('click', async ()=>{
   renderTurnInfo();
   alert('Turn passed — next player should roll dice.');
 });
+
+// ================= ADMIN RESOURCE EDITOR =================
+const RESOURCE_KEYS = ["wood","brick","sheep","wheat","ore"];
+
+function initResourceEditor(){
+  const sel = document.getElementById('resPlayer');
+  sel.innerHTML = '';
+  PLAYERS.forEach((p,i)=>{
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `${i}: ${p.name}`;
+    sel.appendChild(opt);
+  });
+
+  const editor = document.getElementById('resEditor');
+  editor.innerHTML = '';
+  RESOURCE_KEYS.forEach(r=>{
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <label class="small">${r}</label>
+      <input id="res_${r}" type="number" value="0"
+        style="width:100%;padding:6px;border-radius:6px">
+    `;
+    editor.appendChild(wrap);
+  });
+
+  sel.addEventListener('change', ()=>fillResInputs(+sel.value));
+  if(PLAYERS.length) fillResInputs(0);
+
+  document.getElementById('resSetBtn').onclick = ()=>applyRes('set');
+}
+
+function fillResInputs(pid){
+  const r = PLAYERS[pid].resources || {};
+  RESOURCE_KEYS.forEach(k=>{
+    document.getElementById(`res_${k}`).value = r[k] || 0;
+  });
+}
+
+function readResInputs(){
+  const out = {};
+  RESOURCE_KEYS.forEach(k=>{
+    out[k] = parseInt(document.getElementById(`res_${k}`).value) || 0;
+  });
+  return out;
+}
+
+async function applyRes(){
+  const pid = +document.getElementById('resPlayer').value;
+  const input = readResInputs();
+  const final = {};
+
+  RESOURCE_KEYS.forEach(k=>{
+    final[k] = Math.max(0, input[k]);
+  });
+
+  const res = await fetch('/api/set_resources',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ player: pid, resources: final })
+  });
+
+  if(!res.ok){
+    document.getElementById('resMsg').textContent = 'Update failed';
+    return;
+  }
+
+  const j = await res.json();
+  PLAYERS[pid] = j.player;
+  renderPlayers();
+  document.getElementById('resMsg').textContent = 'Resources updated';
+}
 
 // init
 loadState();
