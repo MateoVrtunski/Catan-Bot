@@ -26,7 +26,6 @@ class CatanGame:
             "devcard": {"sheep": 1, "wheat": 1, "ore": 1}
         }
 
-        self.dev_card_deck = self.generate_dev_deck()
         self.current_player_index = 0
         self.logs = []
 
@@ -56,17 +55,13 @@ class CatanGame:
     # ====================================================================
     #  Development Cards
     # ====================================================================
-    def generate_dev_deck(self):
-        deck = (
-            ["knight"] * 14 +
-            ["victory"] * 5 +
-            ["road_building"] * 2 +
-            ["monopoly"] * 2 +
-            ["year_of_plenty"] * 2
-        )
-        random.shuffle(deck)
-        return deck
+    def move_robber(self, tile_index):
+        if tile_index < 0 or tile_index >= len(self.board):
+            return False, "Invalid tile"
+        
+        self.robber_tile = tile_index
 
+        return True, "Robber moved"
     # ====================================================================
     #  Dice & Resource Distribution
     # ====================================================================
@@ -80,6 +75,8 @@ class CatanGame:
             if tile.get("number") == dice_number:
                 res = tile.get("type")
                 if res == "desert":
+                    continue
+                if hex_index == self.robber_tile:
                     continue
 
                 for iv in self.intersections:

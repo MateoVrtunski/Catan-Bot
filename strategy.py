@@ -654,7 +654,7 @@ def city_placement(player_id, intersections, board):
     return best_intersection
 
 
-def in_game_start(players, player_id, intersections, roads, board):
+def in_game_strat(players, player_id, intersections, roads, board):
 
     player = players[player_id]
     resources = player["resources"]
@@ -689,28 +689,27 @@ def in_game_start(players, player_id, intersections, roads, board):
     if can_afford(player, city_cost) == True and player["settlements_left"] < 5:
         strategy_1 = {"city": city_loc}
         trad = {"i_need":None, "i_give": None}
-        return strategy_1, trad
+        
     
     missing_city, extra_city = compute_missing_and_extra(city_cost)
     if player["settlements_left"] < 5 and len(missing_city) == 1 and len(extra_city) > 0:
         strategy_1 = {"city": city_loc}
         trad = {"i_need": missing_city, "i_give": extra_city}
-        return strategy_1, trad
+        
 
     if can_afford(player, settlement_cost) == True and player["settlements_left"] > 0 and t == True:
         strategy_1 = {"settlement": set_loc}
         trad = {"i_need":None, "i_give": None}
-        return strategy_1, trad
+        
     
     missing_set, extra_set = compute_missing_and_extra(settlement_cost)
     if player["settlements_left"] > 0 and t and len(missing_set) == 1 and len(extra_set) > 0:
         strategy_1 = {"settlement": set_loc}
         trad = {"i_need": missing_set, "i_give": extra_set}
-        return strategy_1, trad
+        
     
-    return None
+    return strategy_1, trad
 
-print(in_game_start(players,0,intersections,roads,bo))
     
 
     

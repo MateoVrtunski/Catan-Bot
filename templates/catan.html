@@ -44,6 +44,13 @@
         <button id="rollBtn">Roll / Give</button>
       </div>
 
+      <strong>Strategy Decision</strong>
+
+      <div class="action-row">
+        <select id="decisionPlayer" style="flex:1;padding:6px;border-radius:6px"></select>
+        <button id="decisionBtn">Decision</button>
+      </div>
+
       <strong>Actions</strong>
       <div class="action-row">
         <button id="actSettlement">Place Settlement</button>
@@ -54,9 +61,9 @@
       <div style="display:flex;gap:8px;margin-top:8px">
         <button id="buyCard">Buy Dev Card</button>
         <button id="passBtn">Pass Turn</button>
+        <button id="actRobber">Move Robber</button>
       </div>
 
-      <div style="margin-top:10px" class="small">Click the board to perform actions when in the correct mode. Dice must be rolled at the start of each turn (or enter dice value manually then click Roll).</div>
       <hr style="margin:12px 0">
 
       <strong>Admin: Edit Resources</strong>
@@ -101,6 +108,7 @@ let INTERSECTIONS = []; // computed on client too for interactions
 let hexSize = 55;
 let LAND_AXIAL = generateAxialCoordsRadius(2).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))<=2).sort((a,b)=>a.r-b.r||a.q-b.q);
 let WATER_AXIAL = generateAxialCoordsRadius(3).filter(c=>Math.max(Math.abs(c.q),Math.abs(c.r),Math.abs(-c.q-c.r))===3);
+let ROBBER_TILE = null;
 
 let mode = null; // null | 'settlement' | 'road' | 'city'
 let turn = 0; // current player index
@@ -123,11 +131,13 @@ async function loadState(){
   PLACEMENTS = Array.isArray(data.placements)?data.placements:[];
   ROADS = Array.isArray(data.roads)?data.roads:[];
   INTERSECTIONS = Array.isArray(data.intersection)?data.intersection:[];
+  ROBBER_TILE = data.robber_tile;
  
   draw();
   renderPlayers();
   renderTurnInfo();
   initResourceEditor();
+  initDecisionPlayers();
 }
 
 
@@ -166,6 +176,25 @@ function draw(){
     poly.setAttribute('fill', tile.type ? ( { wood:'#2e8b57', brick:'#c2410c', sheep:'#9ae6b4', wheat:'#f6e05e', ore:'#94a3b8', desert:'#d6c9a8' }[tile.type] ) : '#0b1220');
     poly.setAttribute('stroke','#071224'); poly.setAttribute('stroke-width','2');
     svg.appendChild(poly);
+
+    poly.addEventListener('click', async ()=>{
+      if(mode !== 'robber') return;
+
+      const res = await fetch('/api/robber', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tile: i })
+      });
+
+      if(!res.ok){
+        alert('Failed to move robber');
+        return;
+      }
+
+      mode = null;
+      await loadState();
+    });
+
     if(tile.number){
     const circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
     circ.setAttribute('cx', p.x);
@@ -185,6 +214,15 @@ function draw(){
     txt.textContent = tile.number;
     svg.appendChild(txt);
     }
+    if(ROBBER_TILE === i){
+      const r = document.createElementNS('http://www.w3.org/2000/svg','circle');
+      r.setAttribute('cx', p.x);
+      r.setAttribute('cy', p.y - size * 0.15);
+      r.setAttribute('r', size * 0.25);
+      r.setAttribute('fill', '#111');
+      svg.appendChild(r);
+    }
+    
 
   });
 
@@ -245,12 +283,6 @@ function draw(){
     shape.setAttribute("stroke-width", iv.occupiedBy === "None" ? 1 : 2);
     g.appendChild(shape);
 
-    // highlight legal placements (use 'shape' not 'c')
-    if(iv.occupiedBy === "None" && mode === 'settlement' && isLegalPlace(iv)){
-      shape.setAttribute('fill','#fff');
-      shape.setAttribute('stroke','#2ecc71');
-      shape.setAttribute('stroke-width','2');
-    }
 
     // click handler
     g.addEventListener('click', async (e)=>{
@@ -258,7 +290,7 @@ function draw(){
       if(mode==='settlement'){
         // call API to place settlement for current player
         const playerIndex = turn;
-        const res = await fetch('/api/build/settlement', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: playerIndex, intersection: iv.id })});
+        const res = await fetch('/api/build/settlement', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ player: turn, intersection: iv.id })});
         if(!res.ok) { alert('Build failed: '+await res.text()); return; }
         // refresh state
         await loadState();
@@ -301,6 +333,17 @@ function renderPlayers(){
   });
 }
 
+function initDecisionPlayers(){
+  const sel = document.getElementById('decisionPlayer');
+  sel.innerHTML = '';
+  PLAYERS.forEach((p,i)=>{
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `${i}: ${p.name}`;
+    sel.appendChild(opt);
+  });
+}
+
 // show turn info
 function renderTurnInfo(){
   turnInfo.textContent = `Player ${turn+1}'s turn — ${PLAYERS[turn] ? PLAYERS[turn].name : ''}`;
@@ -320,6 +363,8 @@ document.getElementById('rollBtn').addEventListener('click', async ()=>{
 document.getElementById('actSettlement').addEventListener('click', ()=>{ mode='settlement'; alert('Click an empty highlighted intersection to place settlement'); });
 document.getElementById('actRoad').addEventListener('click', ()=>{ mode='road'; alert('Click an intersection you own (or adjacent) then choose neighbor id for road'); });
 document.getElementById('actCity').addEventListener('click', ()=>{ mode='city'; alert('Click your settlement to upgrade to city'); });
+document.getElementById('actRobber').addEventListener('click', ()=>{mode = 'robber';alert('Click a tile to move the robber');});
+
 
 document.getElementById('passBtn').addEventListener('click', async ()=>{
   // advance turn on server if you track turn, otherwise client rotate
@@ -327,6 +372,46 @@ document.getElementById('passBtn').addEventListener('click', async ()=>{
   await loadState();
   renderTurnInfo();
   alert('Turn passed — next player should roll dice.');
+});
+
+document.getElementById('decisionBtn').addEventListener('click', async ()=>{
+  const playerId = +document.getElementById('decisionPlayer').value;
+
+  const res = await fetch('/api/decision/in_game', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ player: playerId })
+  });
+
+  if(!res.ok){
+    alert('Decision failed');
+    return;
+  }
+
+  const data = await res.json();
+
+  if(data.decision === null){
+    alert('No useful action available');
+    return;
+  }
+
+  let msg = `Player ${playerId} decision:\n`;
+
+  if(data.decision.city !== undefined){
+    msg += `• Build CITY at intersection ${data.decision.city}\n`;
+  }
+
+  if(data.decision.settlement !== undefined){
+    msg += `• Build SETTLEMENT at intersection ${data.decision.settlement}\n`;
+  }
+
+  if(data.trade && data.trade.i_need){
+    msg += '\nSuggested trade:\n';
+    msg += `Need: ${JSON.stringify(data.trade.i_need)}\n`;
+    msg += `Give: ${JSON.stringify(data.trade.i_give)}`;
+  }
+
+  alert(msg);
 });
 
 // ================= ADMIN RESOURCE EDITOR =================

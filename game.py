@@ -1,7 +1,7 @@
 # Flask backend for Catan (in-memory storage)
 from flask import Flask, render_template, jsonify, request
 from action import CatanGame
-from strategy import first_two_settlements, strategy as STRATEGY
+from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat
 
 GAME = None
 
@@ -405,7 +405,47 @@ def api_build_road():
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+    
 
+@app.post("/api/robber")
+def api_move_robber():
+    global GAME
+    data = request.get_json()
+    tile = int(data.get("tile"))
+
+    ok, msg = GAME.move_robber(tile)
+    if not ok:
+        return jsonify({"error": msg}), 400
+
+    return jsonify({"ok": True, "robber_tile": tile})
+
+
+
+@app.post("/api/decision/in_game")
+def api_in_game_decision():
+    global GAME
+    if GAME is None:
+        return jsonify({"error": "game not started"}), 400
+
+    data = request.get_json() or {}
+    player_id = int(data.get("player"))
+
+    result = in_game_strat(
+        GAME.players,
+        player_id,
+        GAME.intersections,
+        GAME.roads,
+        GAME.board
+    )
+
+    if result is None:
+        return jsonify({"decision": None})
+
+    strategy, trade = result
+    return jsonify({
+        "decision": strategy,
+        "trade": trade
+    })
 
 # ==============================
 
