@@ -25,6 +25,11 @@
 
     button{padding:8px 10px;border-radius:8px;border:0;background:#60a5fa;color:#04203a;cursor:pointer}
     .action-row{display:flex;gap:8px;align-items:center}
+    .hex-token-circle,
+    .hex-number,
+    .robber {
+    pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -204,6 +209,7 @@ function draw(){
     circ.setAttribute('stroke', '#071224');
     circ.setAttribute('stroke-width', '2');
     circ.setAttribute('class', 'hex-token-circle');
+    circ.style.pointerEvents = 'none';
     svg.appendChild(circ);
 
     const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
@@ -211,16 +217,9 @@ function draw(){
     txt.setAttribute('y', p.y + size * 0.22 + 6);
     txt.setAttribute('text-anchor', 'middle');
     txt.setAttribute('class', 'hex-number');
+    txt.style.pointerEvents = 'none';
     txt.textContent = tile.number;
     svg.appendChild(txt);
-    }
-    if(ROBBER_TILE === i){
-      const r = document.createElementNS('http://www.w3.org/2000/svg','circle');
-      r.setAttribute('cx', p.x);
-      r.setAttribute('cy', p.y - size * 0.15);
-      r.setAttribute('r', size * 0.25);
-      r.setAttribute('fill', '#111');
-      svg.appendChild(r);
     }
     
 
@@ -316,6 +315,29 @@ function draw(){
 
   svg.appendChild(g);
   });
+  // ===== ROBBER (draw on top) =====
+  // ===== ROBBER (draw on top) =====
+  if (ROBBER_TILE !== null && LAND_AXIAL[ROBBER_TILE]) {
+    const ax = LAND_AXIAL[ROBBER_TILE];
+    const p = axialToPixel(ax.q, ax.r, hexSize);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class', 'robber');
+
+    const body = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    body.setAttribute('cx', p.x);
+    body.setAttribute('cy', p.y);
+    body.setAttribute('r', hexSize * 0.45);
+    body.setAttribute('fill', '#000');
+    body.setAttribute('stroke', '#fff');
+    body.setAttribute('stroke-width', '4');
+
+    g.appendChild(body);
+    svg.appendChild(g);
+  }
+
+
+
 }
 
 // render players sidebar

@@ -221,306 +221,81 @@ def first_two_settlements(strategy, intersections, board, player=None):
 
     return winner, road_target
 
-import math
-from copy import deepcopy
-
-def in_game_start2(players, player_id, intersections, roads, board, strategy_weights=None):
-    """
-    Decide an in-game action for player `player_id`.
-
-    Inputs:
-      - players: list of player dicts (each must include 'resources', 'settlements_left', 'cities_left', 'roads_left')
-      - player_id: int index of the player
-      - intersections: list of intersection dicts (each has 'adjacentHexes', 'neighbors', 'occupiedBy', 'type', 'harbor' maybe)
-      - roads: list of road dicts {a:int, b:int, player:int}
-      - board: list of 19 tile dicts {'type','number'}
-      - strategy_weights: optional dict mapping resource type -> weight (defaults provided)
-      - config: optional dict to tune weights/bonuses/discounts
-
-    Returns:
-      one of:
-        - "city on intersection: X"
-        - "settlement on intersection: X"
-        - "road from X to Y"
-        - "buy card"
-    """
-
-    # ---------------- default parameters ----------------
-    default_strategy = {
-        "ore": 10.0,
-        "wheat": 9.0,
-        "wood": 7.4,
-        "sheep": 5.9,
-        "brick": 7.4
-    }
-    if strategy_weights is None:
-        strategy_weights = dict(default_strategy)
-    else:
-        # make sure all keys exist
-        temp = dict(default_strategy)
-        temp.update(strategy_weights)
-        strategy_weights = temp
-
-    cfg = {
-        "harbor_bonus": 15,       # user wanted a constant +20 for harbor placeholder
-        "harbor_bonus_mode": "add", # 'add' adds fixed amount; other modes could be 'scale'
-        "road_discount": 0.4,
-        "priority_weights": {
-            "city": 2.0,
-            "settlement": 1.4,
-            "road": 0.9,
-            "card": 0.7
-        },
-        "piece_availability_boost": {
-            "city_when_no_settlements_left": 8.0,
-            "settlement_when_no_cities_left": 4.0
-        },
-        "dev_card_base_value": 5.0,
-        "eps": 1e-9
-    }
+def robber_decision(player_id, players, board, intersections, robber_tile=None):
     
-
-    # dice probabilities mapping (number -> relative freq)
-    dice_prob_score = {
-        2: 1/36, 12: 1/36,
-        3: 2/36, 11: 2/36,
-        4: 3/36, 10: 3/36,
-        5: 4/36, 9: 4/36,
-        6: 5/36, 8: 5/36
-    }
-
-    # ---------------- helpers ----------------
-    def parse_occupied(x):
-        # normalize occupiedBy values to None or int
-        if x is None:
-            return None
-        if isinstance(x, str):
-            if x.lower() == "none":
-                return None
-            try:
-                return int(x)
-            except Exception:
-                return None
-        return int(x)
-
-    # normalize a local copy of intersections so we don't mutate outside
-    inters = deepcopy(intersections)
-    for iv in inters:
-        iv['occupiedBy'] = parse_occupied(iv.get('occupiedBy'))
-
-    # players safety
-    if not (0 <= player_id < len(players)):
-        return "buy card"   # can't find player -> safe fallback
-
-    player = players[player_id]
-    resources = player.get('resources', {})
-    # ensure numeric resources
-    resources = {k: int(v) if v is not None else 0 for k, v in resources.items()}
-
-    # helper: intersection production value (settlement expected production)
-    def intersection_value(iv):
-        total = 0.0
-        for hi in iv.get("adjacentHexes", []):
-            if not (0 <= hi < len(board)):
-                continue
-            tile = board[hi]
-            if not tile: continue
-            ttype = tile.get("type")
-            num = tile.get("number")
-            if ttype == 'desert' or num is None:
-                continue
-            prob = dice_prob_score.get(num, 0)
-            weight = strategy_weights.get(ttype, 0)
-            total += weight * prob * 36.0   # multiply by 36 to use integer-like scores (optional)
-            # NOTE: multiplication by 36 is merely scaling so scores are human-friendly
-        # harbor bonus: if harbor exists and not "None" add fixed bonus
-        hv = iv.get("harbor", iv.get("harbour", None))
-        if hv is not None and hv != "None":
-            if cfg["harbor_bonus_mode"] == "add":
-                total += cfg["harbor_bonus"]
-            else:
-                total *= (1.0 + cfg["harbor_bonus"])
-        return total
-
-    # helper: is legal placement for intersection given current state
-    def is_legal_settlement(iv_idx):
-        iv = inters[iv_idx]
-        if not iv.get("adjacentHexes"): return False
-        if iv.get("occupiedBy") is not None: return False
-        for nid in iv.get("neighbors", []):
-            if 0 <= nid < len(inters) and inters[nid].get("occupiedBy") is not None:
-                return False
-        return True
-
-    # helper: edge exists
-    def edge_exists(a,b):
-        for r in roads:
-            if (r.get('a') == a and r.get('b') == b) or (r.get('a') == b and r.get('b') == a):
-                return True
-        return False
-
-    # affordability function for cost dict
-    def affordability(cost):
-        # cost: {'ore':3, ...}
-        parts = []
-        for k, need in cost.items():
-            have = int(resources.get(k, 0))
-            if need <= 0:
-                parts.append(1.0)
-            else:
-                parts.append(min(have / need, 1.0))
-        if not parts:
-            return 1.0
-        return sum(parts) / len(parts)
-
-    # ---------------- compute intersection values for all ----------------
-    iv_values = [intersection_value(iv) for iv in inters]
-    max_iv_value = max(iv_values) if iv_values else 0.0
-    if max_iv_value <= 0:
-        max_iv_value = cfg["eps"]
-
-    # ---------------- City evaluation ----------------
-    city_cost = {"wheat": 2, "ore": 3}
-    best_city_score = 0.0
-    best_city_idx = None
-    # candidate cities are player's settlements
-    for idx, iv in enumerate(inters):
-        if iv.get("occupiedBy") == player_id and iv.get("type") in (None, "settlement", "settlement"):  # accept typical field names
-            marginal_value = iv_values[idx]  # city doubles, marginal = settlement value
-            aff = affordability(city_cost)
-            # strategic term normalized
-            strategic_term = marginal_value / (max_iv_value + cfg["eps"])
-            # base score
-            score = cfg["priority_weights"]["city"] * aff * (1.0 + strategic_term)
-            if score > best_city_score:
-                best_city_score = score
-                best_city_idx = idx
-
-    # ---------------- Settlement evaluation ----------------
-    settlement_cost = {"brick":1, "wood":1, "sheep":1, "wheat":1}
-    # choose best legal intersection (highest iv_value among legal)
-    best_settlement_idx = None
-    best_settlement_value = 0.0
-    for idx, iv in enumerate(inters):
-        if not is_legal_settlement(idx):
-            continue
-        val = iv_values[idx]
-        if val > best_settlement_value:
-            best_settlement_value = val
-            best_settlement_idx = idx
-
-    aff_settlement = affordability(settlement_cost)
-    strategic_term_settlement = best_settlement_value / (max_iv_value + cfg["eps"])
-    best_settlement_score = cfg["priority_weights"]["settlement"] * aff_settlement * (1.0 + strategic_term_settlement) if best_settlement_idx is not None else 0.0
-
-    # ---------------- Road evaluation ----------------
-    # We'll consider building a road adjacent to any owned intersection, and
-    # look two steps out (via an unoccupied n1) for the best settle-able intersection.
-    road_cost = {"brick":1, "wood":1}
-    best_road_score = 0.0
-    best_road_from = None
-    best_road_to = None
-    # precompute legal settlement mask
-    legal_mask = [is_legal_settlement(i) for i in range(len(inters))]
-
-    for base_idx, base_iv in enumerate(inters):
-        if base_iv.get("occupiedBy") != player_id:
-            continue
-        # for each neighbor n1 we may build to
-        for n1 in base_iv.get("neighbors", []):
-            if not (0 <= n1 < len(inters)):
-                continue
-            # If n1 is occupied by any player, we cannot "go in this direction" per your requirement
-            if inters[n1].get("occupiedBy") is not None:
-                continue
-            # skip if road already exists between base and n1
-            if edge_exists(base_idx, n1):
-                continue
-            # now check neighbors of n1 (distance 2)
-            best_reachable = 0.0
-            best_reachable_idx = None
-            for n2 in inters[n1].get("neighbors", []):
-                if not (0 <= n2 < len(inters)):
-                    continue
-                # exclude the base itself and direct neighbors of base to avoid immediate adjacency rules
-                if n2 == base_idx or n2 in base_iv.get("neighbors", []):
-                    continue
-                # candidate n2 must be a legal settlement spot
-                if not legal_mask[n2]:
-                    continue
-                # prefer highest iv_values
-                if iv_values[n2] > best_reachable:
-                    best_reachable = iv_values[n2]
-                    best_reachable_idx = n2
-            if best_reachable_idx is None:
-                continue
-            # compute score for this road candidate
-            aff_r = affordability(road_cost)
-            strategic_r = (best_reachable / (max_iv_value + cfg["eps"])) * cfg["road_discount"]
-            score_r = cfg["priority_weights"]["road"] * aff_r * (1.0 + strategic_r)
-            if score_r > best_road_score:
-                best_road_score = score_r
-                best_road_from = base_idx
-                best_road_to = n1  # road built from base to n1 (the immediate neighbor)
-                # store reachable index as additional info (not required in return)
-                best_road_reachable = best_reachable_idx
-
-    # ---------------- Dev card evaluation ----------------
-    card_cost = {"sheep":1, "wheat":1, "ore":1}
-    aff_card = affordability(card_cost)
-    # dev_card value baseline, but scale a bit with missing options
-    dev_val = cfg["dev_card_base_value"]
-    strategic_card_score = cfg["priority_weights"]["card"] * aff_card * (1.0 + dev_val / (max_iv_value + cfg["eps"]))
-    best_card_score = strategic_card_score
-
-    # ---------------- piece availability adjustments ----------------
-    pw = cfg["priority_weights"]
-    if player.get("settlements_left", 1) == 0:
-        # must go city route almost always
-        best_city_score *= cfg["piece_availability_boost"]["city_when_no_settlements_left"]
-    if player.get("cities_left", 1) == 0:
-        best_settlement_score *= cfg["piece_availability_boost"]["settlement_when_no_cities_left"]
-    if player.get("roads_left", 1) == 0:
-        best_road_score = 0.0
-
-    # ---------------- choose best ----------------
-    actions = [
-        ("city", best_city_score, best_city_idx),
-        ("settlement", best_settlement_score, best_settlement_idx),
-        ("road", best_road_score, (best_road_from, best_road_to)),
-        ("card", best_card_score, None)
+    DICE_PROB = {
+    2: 1, 3: 2, 4: 3, 5: 4, 6: 5,
+    8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+    # --- 1. Find strongest opponent ---
+    opponents = [
+        (i, p) for i, p in enumerate(players)
+        if i != player_id
     ]
-    # sort by score desc, tie break by priority order city>settlement>road>card
-    priority_order = {"city": 0, "settlement": 1, "road": 2, "card": 3}
-    actions.sort(key=lambda x: (x[1], -priority_order[x[0]]), reverse=True)
 
-    best_action, best_score, best_data = actions[0]
+    if not opponents:
+        return None
 
-    # if no positive score at all, fall back to buy card or no-op
-    if best_score <= 0:
-        return "buy card"
+    target_id, target_player = max(
+        opponents,
+        key=lambda x: x[1].get("victory_points", 0)
+    )
 
-    if best_action == "city":
-        if best_city_idx is None:
-            return "buy card"
-        return f"city on intersection: {best_city_idx}"
-    elif best_action == "settlement":
-        if best_settlement_idx is None:
-            return "buy card"
-        return f"settlement on intersection: {best_settlement_idx}"
-    elif best_action == "road":
-        if best_road_from is None or best_road_to is None:
-            return "buy card"
-        return f"road from {best_road_from} to {best_road_to}"
-    else:
-        return "buy card"
+    # --- 2. Score tiles ---
+    tile_scores = {}
+
+    for iv in intersections:
+        occ = iv.get("occupiedBy")
+        if occ != target_id:
+            continue
+
+        building = iv.get("type")
+        if building not in ("settlement", "city"):
+            continue
+
+        weight = 2 if building == "city" else 1
+
+        for tile_idx in iv.get("adjacentHexes", []):
+            if tile_idx == robber_tile:
+                continue
+
+            tile = board[tile_idx]
+            number = tile.get("number")
+
+            if number not in DICE_PROB:
+                continue
+
+            # skip tiles where current player also benefits
+            skip = False
+            for iv2 in intersections:
+                if (
+                    iv2.get("occupiedBy") == player_id
+                    and tile_idx in iv2.get("adjacentHexes", [])
+                ):
+                    skip = True
+                    break
+
+            if skip:
+                continue
+
+            score = DICE_PROB[number] * weight
+            tile_scores[tile_idx] = tile_scores.get(tile_idx, 0) + score
+
+    if not tile_scores:
+        return None
+
+    best_tile = max(tile_scores, key=tile_scores.get)
+    tile = board[best_tile]
+
+    return best_tile, tile.get("type"), tile.get("number")
+
+
 
 
 players=data.players_in_game
 intersections = data.int_in_game
 roads = data.roads_in_game
 
-
+print(robber_decision(0,players,bo,intersections,9))
 
 city_cost = {"wheat": 2, "ore": 3}
 settlement_cost ={"wheat":1, "sheep":1, "wood":1,"brick":1}

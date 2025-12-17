@@ -14,6 +14,7 @@ PLAYERS = []         # [{name, color}, ...]
 PLACEMENTS = []      # placement records
 ROADS = []   # list of {player:int, a:int, b:int}
 INTERSECTIONS = []
+ROBBER_TILE = 9
 # ========== ROUTES ==========
 
 @app.route("/")
@@ -101,7 +102,8 @@ def api_state():
         "players": PLAYERS,
         "placements": PLACEMENTS,
         "roads": ROADS,
-        "intersection": INTERSECTIONS
+        "intersection": INTERSECTIONS,
+        "robber_tile": ROBBER_TILE
     })
 
 
@@ -409,15 +411,16 @@ def api_build_road():
 
 @app.post("/api/robber")
 def api_move_robber():
-    global GAME
+    global GAME, ROBBER_TILE 
     data = request.get_json()
     tile = int(data.get("tile"))
 
     ok, msg = GAME.move_robber(tile)
     if not ok:
         return jsonify({"error": msg}), 400
+    ROBBER_TILE = tile
 
-    return jsonify({"ok": True, "robber_tile": tile})
+    return jsonify({"ok": True, "robber_tile": ROBBER_TILE})
 
 
 
