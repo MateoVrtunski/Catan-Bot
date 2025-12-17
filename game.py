@@ -1,7 +1,7 @@
 # Flask backend for Catan (in-memory storage)
 from flask import Flask, render_template, jsonify, request
 from action import CatanGame
-from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat
+from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat, robber_decision
 
 GAME = None
 
@@ -15,6 +15,8 @@ PLACEMENTS = []      # placement records
 ROADS = []   # list of {player:int, a:int, b:int}
 INTERSECTIONS = []
 ROBBER_TILE = 9
+LONGEST_ROAD_OWNER = None   
+LARGEST_ARMY_OWNER = None 
 # ========== ROUTES ==========
 
 @app.route("/")
@@ -103,7 +105,9 @@ def api_state():
         "placements": PLACEMENTS,
         "roads": ROADS,
         "intersection": INTERSECTIONS,
-        "robber_tile": ROBBER_TILE
+        "robber_tile": ROBBER_TILE,
+        "longest_road": LONGEST_ROAD_OWNER,
+        "largest_army": LARGEST_ARMY_OWNER
     })
 
 
@@ -160,7 +164,7 @@ def api_decision():
 
 @app.post("/api/place")
 def api_place():
-    global PLACEMENTS, INTERSECTIONS
+    global PLACEMENTS, INTERSECTIONS, PLAYERS
 
     data = request.get_json()
     player = data.get("player")
@@ -182,7 +186,8 @@ def api_place():
             iv["occupiedBy"] = int(player)
             iv["type"] = "settlement"
             break
-
+    if INTERSECTIONS[int(intersection)]["harbor"] != "None":
+        PLAYERS[int(player)]["harbours"].append(INTERSECTIONS[int(intersection)]["harbor"])
     return jsonify({"ok": True})
 
 @app.post("/api/road")
@@ -283,7 +288,7 @@ def api_roll():
         if d < 2 or d > 12:
             return jsonify({"error": "Dice must be between 2 and 12"}), 400
 
-        events = GAME.distribute_resources(d)
+        events = GAME.distribute_resources(d, ROBBER_TILE)
         return jsonify({"ok": True, "dice": d, "events": events})
 
     except Exception as e:
@@ -448,6 +453,86 @@ def api_in_game_decision():
     return jsonify({
         "decision": strategy,
         "trade": trade
+    })
+
+@app.post("/api/decision/robber")
+def api_robber_decision():
+    global GAME, ROBBER_TILE
+
+    if GAME is None:
+        return jsonify({"error": "game not started"}), 400
+
+    data = request.get_json() or {}
+    player_id = int(data.get("player"))
+
+    result = robber_decision(
+        player_id,
+        GAME.players,
+        GAME.board,
+        GAME.intersections,
+        robber_tile=ROBBER_TILE
+    )
+
+    if result is None:
+        return jsonify({"decision": None})
+
+    tile_idx, resource, number = result
+
+    return jsonify({
+        "tile": tile_idx,
+        "resource": resource,
+        "number": number
+    })
+
+
+@app.post("/api/award/longest_road")
+def award_longest_road():
+    global LONGEST_ROAD_OWNER
+
+    data = request.get_json() or {}
+    player = data.get("player")
+
+    if player is None:
+        return jsonify({"error": "player required"}), 400
+
+    player = int(player)
+
+    # Remove VP from previous owner
+    if LONGEST_ROAD_OWNER is not None:
+        PLAYERS[LONGEST_ROAD_OWNER]["victory_points"] -= 2
+
+    # Assign new owner
+    LONGEST_ROAD_OWNER = player
+    PLAYERS[player]["victory_points"] += 2
+
+    return jsonify({
+        "ok": True,
+        "longest_road": player
+    })
+
+@app.post("/api/award/largest_army")
+def award_largest_army():
+    global LARGEST_ARMY_OWNER
+
+    data = request.get_json() or {}
+    player = data.get("player")
+
+    if player is None:
+        return jsonify({"error": "player required"}), 400
+
+    player = int(player)
+
+    # Remove VP from previous owner
+    if LARGEST_ARMY_OWNER is not None:
+        PLAYERS[LARGEST_ARMY_OWNER]["victory_points"] -= 2
+
+    # Assign new owner
+    LARGEST_ARMY_OWNER = player
+    PLAYERS[player]["victory_points"] += 2
+
+    return jsonify({
+        "ok": True,
+        "largest_army": player
     })
 
 # ==============================

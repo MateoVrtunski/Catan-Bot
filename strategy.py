@@ -191,32 +191,26 @@ def first_two_settlements(strategy, intersections, board, player=None):
 
     # winner is already defined above
     start = winner
+    neighbors = intersections[start].get("neighbors", [])
 
-    candidate_intersections = set()
+    road_target = None
+    best_score = -1
 
-    # neighbors of winner
-    for n1 in intersections[start].get("neighbors", []):
-        occ1 = intersections[n1].get("occupiedBy")
-        if occ1 is not None and str(occ1).lower() != "None":
+    for n in neighbors:
+        if not (0 <= n < len(intersections)):
             continue
 
-        for n2 in intersections[n1].get("neighbors", []):
-            # exclude the winner itself and direct neighbors
-            if n2 != start and n2 not in intersections[start].get("neighbors", []):
-                candidate_intersections.add(n2)
+        iv_n = intersections[n]
+        occ = iv_n.get("occupiedBy")
 
-    # remove invalid indices
-    candidate_intersections = [
-        c for c in candidate_intersections
-        if 0 <= c < len(intersections)
-    ]
+        # must be empty
+        if occ not in (None, "None"):
+            continue
 
-    # if no valid candidates → fallback
-    if not candidate_intersections:
-        road_target = None
-    else:
-        # choose the best-scoring among distance-2 intersections
-        road_target = max(candidate_intersections, key=lambda c: scores[c])
+        s = scores[n]
+        if s > best_score:
+            best_score = s
+            road_target = n
 
 
     return winner, road_target
@@ -464,24 +458,47 @@ def in_game_strat(players, player_id, intersections, roads, board):
     if can_afford(player, city_cost) == True and player["settlements_left"] < 5:
         strategy_1 = {"city": city_loc}
         trad = {"i_need":None, "i_give": None}
-        
+        return strategy_1, trad
+    
+    if can_afford(player, settlement_cost) == True and player["settlements_left"] > 0 and t == True:
+        strategy_1 = {"settlement or road to": set_loc}
+        trad = {"i_need":None, "i_give": None}
+        return strategy_1, trad
     
     missing_city, extra_city = compute_missing_and_extra(city_cost)
-    if player["settlements_left"] < 5 and len(missing_city) == 1 and len(extra_city) > 0:
+    if (player["settlements_left"] < 5 and list(missing_city.values())[0] == 1 and len(extra_city) > 0) or player["settlements_left"] == 0:
         strategy_1 = {"city": city_loc}
         trad = {"i_need": missing_city, "i_give": extra_city}
-        
+        return strategy_1, trad
 
-    if can_afford(player, settlement_cost) == True and player["settlements_left"] > 0 and t == True:
-        strategy_1 = {"settlement": set_loc}
-        trad = {"i_need":None, "i_give": None}
-        
-    
     missing_set, extra_set = compute_missing_and_extra(settlement_cost)
-    if player["settlements_left"] > 0 and t and len(missing_set) == 1 and len(extra_set) > 0:
-        strategy_1 = {"settlement": set_loc}
+    if player["settlements_left"] > 0 and t == True and list(missing_set.values())[0] == 1 and len(extra_set) > 0:
+        strategy_1 = {"settlement or road to": set_loc}
         trad = {"i_need": missing_set, "i_give": extra_set}
-        
+        return strategy_1, trad
+    
+    if can_afford(player, card_cost) == True:
+        strategy_1 = {"card": None}
+        trad = {"i_need":None, "i_give": None}
+        return strategy_1, trad
+    
+    missing_card, extra_card = compute_missing_and_extra(card_cost)
+    if player["settlements_left"] < 5 and list(missing_card.values())[0] == 1 and len(extra_card) > 0:
+        strategy_1 = {"card": None}
+        trad = {"i_need": missing_card, "i_give": extra_card}
+        return strategy_1, trad
+    
+    if can_afford(player, road_cost) == True:
+        strategy_1 = {"road": set_loc}
+        trad = {"i_need":None, "i_give": None}
+        return strategy_1, trad
+    
+    missing_road, extra_road = compute_missing_and_extra(road_cost)
+    if player["settlements_left"] < 5 and list(missing_road.values())[0] == 1 and len(extra_road) > 0:
+        strategy_1 = {"road": set_loc}
+        trad = {"i_need": missing_road, "i_give": extra_road}
+        return strategy_1, trad
+
     
     return strategy_1, trad
 

@@ -65,7 +65,7 @@ class CatanGame:
     # ====================================================================
     #  Dice & Resource Distribution
     # ====================================================================
-    def distribute_resources(self, dice_number):
+    def distribute_resources(self, dice_number, robber_tile):
         if dice_number == 7:
             return []  # robber logic not implemented yet
 
@@ -76,7 +76,7 @@ class CatanGame:
                 res = tile.get("type")
                 if res == "desert":
                     continue
-                if hex_index == self.robber_tile:
+                if hex_index == robber_tile:
                     continue
 
                 for iv in self.intersections:
@@ -171,6 +171,9 @@ class CatanGame:
         pl["victory_points"] += 1
         iv["occupiedBy"] = player_index
         iv["type"] = "settlement"
+        if iv["harbor"] != "None":
+            pl["harbours"].append(iv["harbor"])
+
         return True, "Settlement built"
 
     def build_city(self, player_index, intersection_id):
