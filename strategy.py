@@ -1,4 +1,4 @@
-import data
+import data, data2
 import pulp as pl
 
 # Create LP problem: choose Maximize or Minimize
@@ -335,6 +335,7 @@ def settlement_possible(player_id, roads, intersections, board):
         adjacency.setdefault(b, set()).add(a)
 
     possible_locations = []
+    scored_locations = []
 
     # examine each endpoint of each road
     for a, b in player_edges:
@@ -343,21 +344,16 @@ def settlement_possible(player_id, roads, intersections, board):
             I = intersections[node]
 
             # occupied?
-            if I["occupiedBy"] != "None":
-                continue
+            for n in I.get("neighbors", []):
+                J = intersections[n]
 
-            # distance rule: neighbors must be empty
-            blocked = False
-            for n in I["neighbors"]:
-                if intersections[n]["occupiedBy"] != "None":
-                    blocked = True
-                    break
-            if blocked:
-                continue
+                if J["occupiedBy"] not in (None, "None"):
+                    continue
 
-            # needs at least 2 connected roads
-            if len(adjacency[node]) < 2:
-                continue
+                # avoid scoring existing settlements again
+                if J["occupiedBy"] == player_id:
+                    continue
+
 
             # valid placement → score it
             score = 0
@@ -373,17 +369,27 @@ def settlement_possible(player_id, roads, intersections, board):
             if I.get("harbor") not in (None, "None"):
                 score += HARBOUR_VALUE
 
+            scored_locations.append((score, node))
+
+
+            if len(adjacency.get(node, set())) < 2:
+                continue
+
             possible_locations.append((score, node))
 
-    # no valid locations
-    if not possible_locations:
-        return False, None
+    
+    if possible_locations:
+        possible_locations.sort(reverse=True)
+        best_score, best_node = possible_locations[0]
+        return True, best_node
 
-    # pick location with highest score
-    possible_locations.sort(reverse=True)  # highest score first
-    best_score, best_node = possible_locations[0]
+    # otherwise choose best future target (for road planning)
+    if scored_locations:
+        scored_locations.sort(reverse=True)
+        best_score, best_node = scored_locations[0]
+        return False, best_node
 
-    return True, best_node
+    return False, None
 
 
 def city_placement(player_id, intersections, board):
@@ -466,13 +472,13 @@ def in_game_strat(players, player_id, intersections, roads, board):
         return strategy_1, trad
     
     missing_city, extra_city = compute_missing_and_extra(city_cost)
-    if (player["settlements_left"] < 5 and list(missing_city.values())[0] == 1 and len(extra_city) > 0) or player["settlements_left"] == 0:
+    if (player["settlements_left"] < 5 and sum(missing_city.values()) == 1 and len(extra_city) > 0) or player["settlements_left"] == 0:
         strategy_1 = {"city": city_loc}
         trad = {"i_need": missing_city, "i_give": extra_city}
         return strategy_1, trad
 
     missing_set, extra_set = compute_missing_and_extra(settlement_cost)
-    if player["settlements_left"] > 0 and t == True and list(missing_set.values())[0] == 1 and len(extra_set) > 0:
+    if player["settlements_left"] > 0 and t == True and sum(missing_set.values()) == 1 and len(extra_set) > 0:
         strategy_1 = {"settlement or road to": set_loc}
         trad = {"i_need": missing_set, "i_give": extra_set}
         return strategy_1, trad
@@ -483,7 +489,7 @@ def in_game_strat(players, player_id, intersections, roads, board):
         return strategy_1, trad
     
     missing_card, extra_card = compute_missing_and_extra(card_cost)
-    if player["settlements_left"] < 5 and list(missing_card.values())[0] == 1 and len(extra_card) > 0:
+    if player["settlements_left"] < 5 and sum(missing_card.values()) == 1 and len(extra_card) > 0:
         strategy_1 = {"card": None}
         trad = {"i_need": missing_card, "i_give": extra_card}
         return strategy_1, trad
@@ -494,7 +500,7 @@ def in_game_strat(players, player_id, intersections, roads, board):
         return strategy_1, trad
     
     missing_road, extra_road = compute_missing_and_extra(road_cost)
-    if player["settlements_left"] < 5 and list(missing_road.values())[0] == 1 and len(extra_road) > 0:
+    if player["settlements_left"] < 5 and sum(missing_road.values()) == 1 and len(extra_road) > 0:
         strategy_1 = {"road": set_loc}
         trad = {"i_need": missing_road, "i_give": extra_road}
         return strategy_1, trad
@@ -502,8 +508,4 @@ def in_game_strat(players, player_id, intersections, roads, board):
     
     return strategy_1, trad
 
-    
-
-    
-    
-    
+print(settlement_possible(0,data2.data["roads"],data2.data["intersection"], data2.data["board"]))

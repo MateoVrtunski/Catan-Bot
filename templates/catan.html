@@ -457,6 +457,14 @@ document.getElementById('decisionBtn').addEventListener('click', async ()=>{
     msg += `• Build SETTLEMENT at intersection ${data.decision.settlement}\n`;
   }
 
+  if(data.decision.road !== undefined){
+    msg += `• Build ROAD toward intersection ${data.decision.road}\n`;
+  }
+
+  if(data.decision.card !== undefined){
+    msg += `• Buy CARD \n`;
+  }
+
   if(data.trade && data.trade.i_need){
     msg += '\nSuggested trade:\n';
     msg += `Need: ${JSON.stringify(data.trade.i_need)}\n`;
