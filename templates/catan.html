@@ -376,10 +376,19 @@ function renderPlayers(){
     const resources = (p.resources||{wood:0,brick:0,sheep:0,wheat:0,ore:0});
     const hasLongest = LONGEST_ROAD === idx ? " 🛣️ Longest Road" : "";
     const hasArmy = LARGEST_ARMY === idx ? " 🛡️ Largest Army" : "";
+    const dev = p.dev_cards || {};
     div.innerHTML = `<div><strong>${p.name} ${idx===turn? '(current)':''}</strong></div>
       <div class="small">VP: ${p.victory_points || 0}</div>
       <div class="small">${hasLongest}${hasArmy}</div>
       <div class="small">Settlements: ${p.settlements_left} &nbsp; Cities: ${p.cities_left} &nbsp; Roads: ${p.roads_left}</div>
+      <div class="small">
+      Dev cards →
+      K:${dev.knight||0}
+      M:${dev.monopoly||0}
+      P:${dev.plenty||0}
+      R:${dev.road||0}
+      VP:${dev.point||0}
+      </div>
       <div class="small">Wood:${resources.wood} Brick:${resources.brick} Sheep:${resources.sheep} Wheat:${resources.wheat} Ore:${resources.ore}</div>`;
     playersList.appendChild(div);
   });
@@ -530,6 +539,8 @@ document.getElementById('robberDecisionBtn').addEventListener('click', async ()=
 
 // ================= ADMIN RESOURCE EDITOR =================
 const RESOURCE_KEYS = ["wood","brick","sheep","wheat","ore"];
+const DEV_CARD_KEYS = [["knight", "Knight"],["monopoly", "Monopoly"],["plenty", "Card of Plenty"],["road", "Two Roads"],["point", "Victory Point Card"]];
+
 
 function initResourceEditor(){
   const sel = document.getElementById('resPlayer');
@@ -553,16 +564,51 @@ function initResourceEditor(){
     editor.appendChild(wrap);
   });
 
+  const vpWrap = document.createElement('div');
+  vpWrap.innerHTML = `
+    <label class="small">Victory Points</label>
+    <input id="res_vp" type="number" value="0"
+      style="width:100%;padding:6px;border-radius:6px">
+  `;
+  editor.appendChild(vpWrap);
+
+  // ---- Development Cards ----
+  DEV_CARD_KEYS.forEach(([key, label])=>{
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <label class="small">${label}</label>
+      <input id="dev_${key}" type="number" value="0"
+        style="width:100%;padding:6px;border-radius:6px">
+    `;
+    editor.appendChild(wrap);
+  });
+
   sel.addEventListener('change', ()=>fillResInputs(+sel.value));
   if(PLAYERS.length) fillResInputs(0);
 
-  document.getElementById('resSetBtn').onclick = ()=>applyRes('set');
+  document.getElementById('resSetBtn').onclick = (e)=>{
+  e.preventDefault();
+  applyRes();};
+
 }
 
 function fillResInputs(pid){
-  const r = PLAYERS[pid].resources || {};
+  const p = PLAYERS[pid] || {};
+  const r = p.resources || {};
   RESOURCE_KEYS.forEach(k=>{
-    document.getElementById(`res_${k}`).value = r[k] || 0;
+    const el = document.getElementById(`res_${k}`);
+    if(el) el.value = r[k] || 0;
+  });
+
+  // victory points
+  const vpEl = document.getElementById("res_vp");
+  if(vpEl) vpEl.value = (p.victory_points !== undefined) ? p.victory_points : 0;
+
+  // dev cards
+  const d = p.dev_cards || {};
+  DEV_CARD_KEYS.forEach(([key])=>{
+    const el = document.getElementById(`dev_${key}`);
+    if(el) el.value = d[key] || 0;
   });
 }
 
@@ -576,17 +622,40 @@ function readResInputs(){
 
 async function applyRes(){
   const pid = +document.getElementById('resPlayer').value;
-  const input = readResInputs();
-  const final = {};
 
+  // resources
+  const resources = {};
   RESOURCE_KEYS.forEach(k=>{
-    final[k] = Math.max(0, input[k]);
+    resources[k] = Math.max(
+      0,
+      parseInt(document.getElementById(`res_${k}`).value) || 0
+    );
+  });
+
+  // victory points
+  const victory_points = Math.max(
+    0,
+    parseInt(document.getElementById("res_vp").value) || 0
+  );
+
+  // dev cards
+  const dev_cards = {};
+  DEV_CARD_KEYS.forEach(([key])=>{
+    dev_cards[key] = Math.max(
+      0,
+      parseInt(document.getElementById(`dev_${key}`).value) || 0
+    );
   });
 
   const res = await fetch('/api/set_resources',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ player: pid, resources: final })
+    body: JSON.stringify({
+      player: pid,
+      resources,
+      victory_points,
+      dev_cards
+    })
   });
 
   if(!res.ok){
@@ -597,8 +666,9 @@ async function applyRes(){
   const j = await res.json();
   PLAYERS[pid] = j.player;
   renderPlayers();
-  document.getElementById('resMsg').textContent = 'Resources updated';
+  document.getElementById('resMsg').textContent = 'Updated';
 }
+
 
 // init
 loadState();

@@ -283,8 +283,6 @@ def robber_decision(player_id, players, board, intersections, robber_tile=None):
     return best_tile, tile.get("type"), tile.get("number")
 
 
-
-
 players=data.players_in_game
 intersections = data.int_in_game
 roads = data.roads_in_game
@@ -307,87 +305,133 @@ def can_afford(player, cost):
 
 def settlement_possible(player_id, roads, intersections, board):
     """
-    Returns (True, best_location) if a settlement can be placed,
-    where best_location is chosen by highest adjacent tile probability
-    plus harbour bonus.
-    Otherwise returns (False, None).
+    Returns (True, best_buildable_node) if a settlement can be built now
+    (player has at least two connected roads to that intersection and spacing rule ok).
+
+    If no immediate build exists, returns (False, best_future_node) where best_future_node
+    is the best intersection to aim roads towards (one of the neighbors of player's endpoints),
+    or (False, None) when nothing sensible.
+
+    Scoring: sum of tile probabilities adjacent to the intersection + small harbour bonus.
     """
 
-    # --- helper: probability of a number token
     def tile_probability(number):
         if number is None or number < 2 or number > 12:
-            return 0
-        return (6 - abs(number - 7)) / 36   # normal Catan distribution
+            return 0.0
+        return (6 - abs(number - 7)) / 36.0
 
-    # harbour value: acts like number 4 or 10 = 3/36
-    HARBOUR_VALUE = 3 / 36
+    HARBOUR_VALUE = 3 / 36.0
 
-    # collect player's road endpoints
-    player_edges = [(r["a"], r["b"]) for r in roads if r["player"] == player_id]
+    player_roads = [r for r in roads if r.get("player") == player_id]
 
-    if not player_edges:
+    if not player_roads:
         return False, None
 
-    # adjacency map of player's own road network
+    endpoints = set()
+    for r in player_roads:
+        a = r.get("a"); b = r.get("b")
+        if a is not None: endpoints.add(a)
+        if b is not None: endpoints.add(b)
+
     adjacency = {}
-    for a, b in player_edges:
+    for r in player_roads:
+        a = r.get("a"); b = r.get("b")
+        if a is None or b is None: continue
         adjacency.setdefault(a, set()).add(b)
         adjacency.setdefault(b, set()).add(a)
 
-    possible_locations = []
-    scored_locations = []
+    def is_occupied_by_any(iv):
+        occ = iv.get("occupiedBy")
+        return occ is not None and occ != "None"
 
-    # examine each endpoint of each road
-    for a, b in player_edges:
-        for node in (a, b):
+    def is_occupied_by_player(iv, pid):
+        occ = iv.get("occupiedBy")
+        return occ == pid
 
-            I = intersections[node]
+    endpoints = {n for n in endpoints if 0 <= n < len(intersections) and not is_occupied_by_player(intersections[n], player_id)}
 
-            # occupied?
-            for n in I.get("neighbors", []):
-                J = intersections[n]
+    buildable_now = []   
+    scored_future_candidates = []
 
-                if J["occupiedBy"] not in (None, "None"):
-                    continue
+    for node in sorted(endpoints):
+        if not (0 <= node < len(intersections)):
+            continue
+        iv = intersections[node]
 
-                # avoid scoring existing settlements again
-                if J["occupiedBy"] == player_id:
-                    continue
+        if is_occupied_by_any(iv):
+            pass
 
+        neighbor_blocked = False
+        for n in iv.get("neighbors", []):
+            if 0 <= n < len(intersections):
+                if is_occupied_by_any(intersections[n]):
+                    neighbor_blocked = True
+                    break
 
-            # valid placement → score it
-            score = 0
+        score = 0.0
+        for hi in iv.get("adjacentHexes", []):
+            if 0 <= hi < len(board):
+                tile = board[hi]
+                if tile:
+                    score += tile_probability(tile.get("number"))
 
-            # sum adjacent tile probabilities
-            for hi in I.get("adjacentHexes", []):
-                if 0 <= hi < len(board):
-                    tile = board[hi]
-                    if tile:
-                        score += tile_probability(tile.get("number"))
+        hv = iv.get("harbor", iv.get("harbour", None))
+        if hv not in (None, "None"):
+            score += HARBOUR_VALUE
 
-            # harbour bonus (adjust field name if different)
-            if I.get("harbor") not in (None, "None"):
-                score += HARBOUR_VALUE
+        scored_future_candidates.append((score, node))
 
-            scored_locations.append((score, node))
+        if (not is_occupied_by_any(iv)) and (not neighbor_blocked):
+            buildable_now.append((score, node))
 
-
-            if len(adjacency.get(node, set())) < 2:
-                continue
-
-            possible_locations.append((score, node))
-
-    
-    if possible_locations:
-        possible_locations.sort(reverse=True)
-        best_score, best_node = possible_locations[0]
+    if buildable_now:
+        buildable_now.sort(reverse=True, key=lambda x: (x[0], x[1]))
+        best_score, best_node = buildable_now[0]
         return True, best_node
 
-    # otherwise choose best future target (for road planning)
-    if scored_locations:
-        scored_locations.sort(reverse=True)
-        best_score, best_node = scored_locations[0]
-        return False, best_node
+    neighbor_candidates = set()
+    for node in endpoints:
+        iv = intersections[node]
+        for n2 in iv.get("neighbors", []):
+            if 0 <= n2 < len(intersections):
+                neighbor_candidates.add(n2)
+
+    neighbor_candidates = {n for n in neighbor_candidates if 0 <= n < len(intersections) and n not in endpoints}
+
+    scored_neighbors = []
+    for node in sorted(neighbor_candidates):
+        iv = intersections[node]
+        if is_occupied_by_any(iv):
+            continue
+
+        blocked_by_neighbor = False
+        for nn in iv.get("neighbors", []):
+            if 0 <= nn < len(intersections):
+                if is_occupied_by_any(intersections[nn]):
+                    blocked_by_neighbor = True
+                    break
+        if blocked_by_neighbor:
+            continue
+
+        score = 0.0
+        for hi in iv.get("adjacentHexes", []):
+            if 0 <= hi < len(board):
+                tile = board[hi]
+                if tile:
+                    score += tile_probability(tile.get("number"))
+        hv = iv.get("harbor", iv.get("harbour", None))
+        if hv not in (None, "None"):
+            score += HARBOUR_VALUE
+
+        scored_neighbors.append((score, node))
+
+    if scored_neighbors:
+        scored_neighbors.sort(reverse=True, key=lambda x: (x[0], x[1]))
+        return False, scored_neighbors[0][1]
+
+    if scored_future_candidates:
+        scored_future_candidates.sort(reverse=True, key=lambda x: (x[0], x[1]))
+        return False, scored_future_candidates[0][1]
 
     return False, None
 
@@ -467,7 +511,7 @@ def in_game_strat(players, player_id, intersections, roads, board):
         return strategy_1, trad
     
     if can_afford(player, settlement_cost) == True and player["settlements_left"] > 0 and t == True:
-        strategy_1 = {"settlement or road to": set_loc}
+        strategy_1 = {"settlement": set_loc}
         trad = {"i_need":None, "i_give": None}
         return strategy_1, trad
     
@@ -509,3 +553,10 @@ def in_game_strat(players, player_id, intersections, roads, board):
     return strategy_1, trad
 
 print(settlement_possible(0,data2.data["roads"],data2.data["intersection"], data2.data["board"]))
+
+
+def card_decision(player_id, players, board, intersections, robber):
+    player = players[player_id]
+    cards = player["dev_cards"]
+
+    

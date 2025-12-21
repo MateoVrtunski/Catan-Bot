@@ -297,15 +297,40 @@ def api_roll():
 
 @app.post("/api/set_resources")
 def api_set_resources():
-    data = request.get_json()
-    pid = int(data["player"])
-    res = data["resources"]
+    data = request.get_json() or {}
+    try:
+        pid = int(data["player"])
+    except Exception:
+        return jsonify({"error": "invalid player"}), 400
+
+    if pid < 0 or pid >= len(PLAYERS):
+        return jsonify({"error": "player out of range"}), 400
 
     p = PLAYERS[pid]
+
+    # resources (required keys)
+    res = data.get("resources", {})
     for k in ["wood","brick","sheep","wheat","ore"]:
-        p["resources"][k] = max(0, int(res.get(k,0)))
+        p.setdefault("resources", {})
+        p["resources"][k] = max(0, int(res.get(k, p["resources"].get(k, 0))))
+
+    # optional: victory points
+    if "victory_points" in data:
+        try:
+            p["victory_points"] = int(data["victory_points"])
+        except Exception:
+            p["victory_points"] = p.get("victory_points", 0)
+
+    # optional: dev cards (merge/update, store as dict)
+    if "dev_cards" in data:
+        p.setdefault("dev_cards", {})
+        dev_in = data.get("dev_cards") or {}
+        for key in ["knight", "monopoly", "plenty", "road", "point"]:
+            # accept missing keys; keep existing if absent
+            p["dev_cards"][key] = max(0, int(dev_in.get(key, p["dev_cards"].get(key, 0))))
 
     return jsonify({"ok": True, "player": p})
+
 
 
 
