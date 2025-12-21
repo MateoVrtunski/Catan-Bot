@@ -620,54 +620,79 @@ function readResInputs(){
   return out;
 }
 
+// safe, user-friendly applyRes — replaces your current applyRes()
 async function applyRes(){
-  const pid = +document.getElementById('resPlayer').value;
+  try {
+    const pid = +document.getElementById('resPlayer').value;
 
-  // resources
-  const resources = {};
-  RESOURCE_KEYS.forEach(k=>{
-    resources[k] = Math.max(
-      0,
-      parseInt(document.getElementById(`res_${k}`).value) || 0
-    );
-  });
+    // resources
+    const resources = {};
+    RESOURCE_KEYS.forEach(k=>{
+      resources[k] = Math.max(0, parseInt(document.getElementById(`res_${k}`).value) || 0);
+    });
 
-  // victory points
-  const victory_points = Math.max(
-    0,
-    parseInt(document.getElementById("res_vp").value) || 0
-  );
+    // victory points
+    const victory_points = Math.max(0, parseInt(document.getElementById("res_vp").value) || 0);
 
-  // dev cards
-  const dev_cards = {};
-  DEV_CARD_KEYS.forEach(([key])=>{
-    dev_cards[key] = Math.max(
-      0,
-      parseInt(document.getElementById(`dev_${key}`).value) || 0
-    );
-  });
+    // dev cards
+    const dev_cards = {};
+    DEV_CARD_KEYS.forEach(([key])=>{
+      dev_cards[key] = Math.max(0, parseInt(document.getElementById(`dev_${key}`).value) || 0);
+    });
 
-  const res = await fetch('/api/set_resources',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
+    // UI feedback
+    document.getElementById('resMsg').textContent = 'Updating...';
+
+    const payload = {
       player: pid,
-      resources,
-      victory_points,
-      dev_cards
-    })
-  });
+      resources: resources,
+      victory_points: victory_points,
+      dev_cards: dev_cards
+    };
 
-  if(!res.ok){
-    document.getElementById('resMsg').textContent = 'Update failed';
-    return;
+    console.log('applyRes payload', payload);
+
+    const res = await fetch('/api/set_resources',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+
+    const text = await res.text().catch(()=>null);
+    // try parse JSON if server returned JSON
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch(e){ json = null; }
+
+    if(!res.ok){
+      console.error("SET RESOURCES FAILED:", res.status, text);
+      document.getElementById('resMsg').textContent = `Update failed: ${text || res.statusText}`;
+      return;
+    }
+
+    // success — server should return updated player
+    if(json && json.player){
+      PLAYERS[pid] = json.player;
+    } else {
+      // fallback: reload full state
+      await loadState();
+    }
+
+    renderPlayers();
+    document.getElementById('resMsg').textContent = 'Updated';
+
+  } catch (err) {
+    console.error('applyRes exception', err);
+    document.getElementById('resMsg').textContent = 'Update failed: ' + (err.message || String(err));
   }
-
-  const j = await res.json();
-  PLAYERS[pid] = j.player;
-  renderPlayers();
-  document.getElementById('resMsg').textContent = 'Updated';
 }
+
+// ensure button wiring (in case earlier wiring was removed)
+const setBtn = document.getElementById('resSetBtn');
+if (setBtn) {
+  setBtn.removeEventListener('click', applyRes); // safe noop
+  setBtn.addEventListener('click', (e)=>{ e.preventDefault(); applyRes(); });
+}
+
 
 
 // init

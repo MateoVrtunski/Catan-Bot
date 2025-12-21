@@ -299,37 +299,44 @@ def api_roll():
 def api_set_resources():
     data = request.get_json() or {}
     try:
-        pid = int(data["player"])
+        pid = int(data.get("player"))
     except Exception:
         return jsonify({"error": "invalid player"}), 400
 
     if pid < 0 or pid >= len(PLAYERS):
-        return jsonify({"error": "player out of range"}), 400
+        return jsonify({"error": "player index out of range"}), 400
 
     p = PLAYERS[pid]
 
-    # resources (required keys)
+    # update resources
     res = data.get("resources", {})
     for k in ["wood","brick","sheep","wheat","ore"]:
-        p.setdefault("resources", {})
-        p["resources"][k] = max(0, int(res.get(k, p["resources"].get(k, 0))))
+        try:
+            p["resources"][k] = max(0, int(res.get(k, p.get("resources", {}).get(k, 0))))
+        except Exception:
+            p["resources"][k] = 0
 
-    # optional: victory points
+    # victory points (optional)
     if "victory_points" in data:
         try:
-            p["victory_points"] = int(data["victory_points"])
+            p["victory_points"] = int(data.get("victory_points", p.get("victory_points", 0)))
         except Exception:
             p["victory_points"] = p.get("victory_points", 0)
 
-    # optional: dev cards (merge/update, store as dict)
+    # dev cards (optional) -> merge/replace into p["dev_cards"]
     if "dev_cards" in data:
-        p.setdefault("dev_cards", {})
-        dev_in = data.get("dev_cards") or {}
-        for key in ["knight", "monopoly", "plenty", "road", "point"]:
-            # accept missing keys; keep existing if absent
-            p["dev_cards"][key] = max(0, int(dev_in.get(key, p["dev_cards"].get(key, 0))))
+        if "dev_cards" not in p or not isinstance(p.get("dev_cards"), dict):
+            p["dev_cards"] = {}
+        incoming = data.get("dev_cards") or {}
+        for k in ["knight","monopoly","plenty","road","point"]:
+            try:
+                p["dev_cards"][k] = max(0, int(incoming.get(k, p["dev_cards"].get(k, 0))))
+            except Exception:
+                p["dev_cards"][k] = p["dev_cards"].get(k, 0)
 
-    return jsonify({"ok": True, "player": p})
+    return jsonify({"ok": True, "player": p}), 200
+
+
 
 
 
