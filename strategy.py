@@ -304,16 +304,6 @@ def can_afford(player, cost):
     return True
 
 def settlement_possible(player_id, roads, intersections, board):
-    """
-    Returns (True, best_buildable_node) if a settlement can be built now
-    (player has at least two connected roads to that intersection and spacing rule ok).
-
-    If no immediate build exists, returns (False, best_future_node) where best_future_node
-    is the best intersection to aim roads towards (one of the neighbors of player's endpoints),
-    or (False, None) when nothing sensible.
-
-    Scoring: sum of tile probabilities adjacent to the intersection + small harbour bonus.
-    """
 
     def tile_probability(number):
         if number is None or number < 2 or number > 12:
@@ -465,7 +455,6 @@ def city_placement(player_id, intersections, board):
                         num = tile.get("number")
                         total_prob += tile_probability(num)
 
-            # check if this is the highest score so far
             if total_prob > best_score:
                 best_score = total_prob
                 best_intersection = iv.get("id")
@@ -532,19 +521,19 @@ def in_game_strat(players, player_id, intersections, roads, board):
         trad = {"i_need":None, "i_give": None}
         return strategy_1, trad
     
+    if can_afford(player, road_cost) == True and t == False:
+        strategy_1 = {"road": set_loc}
+        trad = {"i_need":None, "i_give": None}
+        return strategy_1, trad
+    
     missing_card, extra_card = compute_missing_and_extra(card_cost)
     if player["settlements_left"] < 5 and sum(missing_card.values()) == 1 and len(extra_card) > 0:
         strategy_1 = {"card": None}
         trad = {"i_need": missing_card, "i_give": extra_card}
         return strategy_1, trad
     
-    if can_afford(player, road_cost) == True:
-        strategy_1 = {"road": set_loc}
-        trad = {"i_need":None, "i_give": None}
-        return strategy_1, trad
-    
     missing_road, extra_road = compute_missing_and_extra(road_cost)
-    if player["settlements_left"] < 5 and sum(missing_road.values()) == 1 and len(extra_road) > 0:
+    if player["settlements_left"] < 5 and sum(missing_road.values()) == 1 and len(extra_road) > 0 and t == False:
         strategy_1 = {"road": set_loc}
         trad = {"i_need": missing_road, "i_give": extra_road}
         return strategy_1, trad

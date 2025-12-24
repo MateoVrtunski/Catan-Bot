@@ -369,8 +369,7 @@ data = {
         22,
         16
       ],
-      "occupiedBy": 2,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": -95.26279441628824,
       "y": 55
     },
@@ -387,7 +386,8 @@ data = {
         9,
         19
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 2,
+      "type": "settlement",
       "x": -95.26279441628824,
       "y": 110
     },
@@ -435,8 +435,7 @@ data = {
         29,
         23
       ],
-      "occupiedBy": 0,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": -47.63139720814412,
       "y": 137.5
     },
@@ -615,8 +614,7 @@ data = {
         38,
         34
       ],
-      "occupiedBy": 0,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": 47.63139720814412,
       "y": -27.5
     },
@@ -633,7 +631,8 @@ data = {
         40,
         35
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 1,
+      "type": "settlement",
       "x": 47.63139720814412,
       "y": 137.5
     },
@@ -748,7 +747,8 @@ data = {
         30,
         44
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 0,
+      "type": "settlement",
       "x": 95.26279441628824,
       "y": -55
     },
@@ -765,7 +765,8 @@ data = {
         45,
         40
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 0,
+      "type": "settlement",
       "x": 95.26279441628824,
       "y": 55
     },
@@ -782,8 +783,7 @@ data = {
         31,
         46
       ],
-      "occupiedBy": 1,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": 95.26279441628824,
       "y": 110
     },
@@ -900,6 +900,7 @@ data = {
         11,
         15
       ],
+      "building": "settlement",
       "harbor": "None",
       "id": 48,
       "neighbors": [
@@ -907,7 +908,8 @@ data = {
         53,
         51
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 0,
+      "type": "settlement",
       "x": 190.5255888325765,
       "y": 55
     },
@@ -930,6 +932,7 @@ data = {
         6,
         11
       ],
+      "building": "settlement",
       "harbor": "None",
       "id": 50,
       "neighbors": [
@@ -937,7 +940,8 @@ data = {
         44,
         52
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 0,
+      "type": "settlement",
       "x": 190.52558883257652,
       "y": -55
     },
@@ -988,17 +992,17 @@ data = {
   "longest_road": None,
   "placements": [
     {
-      "intersection": 30,
+      "intersection": 38,
       "player": 0,
       "type": "settlement"
     },
     {
-      "intersection": 40,
+      "intersection": 31,
       "player": 1,
       "type": "settlement"
     },
     {
-      "intersection": 15,
+      "intersection": 16,
       "player": 2,
       "type": "settlement"
     },
@@ -1013,7 +1017,17 @@ data = {
       "type": "settlement"
     },
     {
-      "intersection": 19,
+      "intersection": 39,
+      "player": 0,
+      "type": "settlement"
+    },
+    {
+      "intersection": 50,
+      "player": 0,
+      "type": "settlement"
+    },
+    {
+      "intersection": 48,
       "player": 0,
       "type": "settlement"
     }
@@ -1027,20 +1041,20 @@ data = {
         "monopoly": 0,
         "plenty": 0,
         "point": 0,
-        "road": 1
+        "road": 0
       },
       "harbours": [],
-      "name": "candamir",
+      "name": "jean",
       "resources": {
         "brick": 1,
-        "ore": 1,
+        "ore": 0,
         "sheep": 0,
-        "wheat": 1,
-        "wood": 0
+        "wheat": 0,
+        "wood": 1
       },
-      "roads_left": 13,
-      "settlements_left": 3,
-      "victory_points": 2
+      "roads_left": 11,
+      "settlements_left": 1,
+      "victory_points": 4
     },
     {
       "cities_left": 4,
@@ -1064,7 +1078,7 @@ data = {
       "color": "green",
       "dev_cards": [],
       "harbours": [],
-      "name": "jean",
+      "name": "candamir",
       "resources": {
         "brick": 1,
         "ore": 0,
@@ -1079,18 +1093,18 @@ data = {
   ],
   "roads": [
     {
-      "a": 30,
-      "b": 38,
+      "a": 38,
+      "b": 44,
       "player": 0
     },
     {
-      "a": 40,
-      "b": 39,
+      "a": 31,
+      "b": 29,
       "player": 1
     },
     {
-      "a": 15,
-      "b": 22,
+      "a": 16,
+      "b": 15,
       "player": 2
     },
     {
@@ -1100,19 +1114,34 @@ data = {
     },
     {
       "a": 33,
-      "b": 32,
+      "b": 37,
       "player": 1
     },
     {
-      "a": 19,
-      "b": 29,
+      "a": 39,
+      "b": 45,
       "player": 0
     },
     {
-      "a": 38,
+      "a": 48,
+      "b": 45,
+      "player": 0
+    },
+    {
+      "a": 48,
+      "b": 45,
+      "player": 0
+    },
+    {
+      "a": 50,
+      "b": 44,
+      "player": 0
+    },
+    {
+      "a": 50,
       "b": 44,
       "player": 0
     }
   ],
-  "robber_tile": 2
+  "robber_tile": 9
 }
