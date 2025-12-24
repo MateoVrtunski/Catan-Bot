@@ -555,8 +555,127 @@ def in_game_strat(players, player_id, intersections, roads, board):
 print(settlement_possible(0,data2.data["roads"],data2.data["intersection"], data2.data["board"]))
 
 
-def card_decision(player_id, players, board, intersections, robber):
+def card_decision(player_id, players, board, intersections, robber, roads=None):
+
+    roads = roads or []
     player = players[player_id]
-    cards = player["dev_cards"]
+    cards = player.get("dev_cards", {}) or {}
+
+    # helper: does robber sit next to one of our buildings?
+    def robber_on_our_tile():
+        if robber is None:
+            return False
+        for iv in intersections:
+            if iv.get("occupiedBy") == player_id:
+                if robber in iv.get("adjacentHexes", []):
+                    return True
+        return False
+
+    # --- 1) KNIGHT logic ---
+    try:
+        knight_count = int(cards.get("knight", 0))
+    except Exception:
+        knight_count = 0
+
+    try:
+        if (knight_count == 1 and robber_on_our_tile()) or knight_count > 1:
+            # move robber now to hurt strongest opponent
+            if "robber_decision" in globals():
+                rd = robber_decision(player_id, players, board, intersections, robber)
+            else:
+                rd = None
+            if rd:
+                tile_idx, ttype, num = rd
+                return {"action": "play_knight", "target": tile_idx, "type": ttype, "number": num}
+            else:
+                return {"action": "play_knight", "reason": "no good target found"}
+        if knight_count >= 2 and (not robber_on_our_tile()):
+            # we have 2+ knights and robber isn't on our tiles -> proactively move robber
+            if "robber_decision" in globals():
+                rd = robber_decision(player_id, players, board, intersections, robber)
+            else:
+                rd = None
+            if rd:
+                tile_idx, ttype, num = rd
+                return {"action": "play_knight", "target": tile_idx, "type": ttype, "number": num}
+            else:
+                return {"action": "play_knight", "reason": "no good target found"}
+    except Exception:
+        # don't crash; fall through to other cards
+        pass
+
+    # --- 2) YEAR OF PLENTY / MONOPOLY logic ---
+    try:
+        plenty_count = int(cards.get("plenty", 0))
+    except Exception:
+        plenty_count = 0
+    try:
+        monopoly_count = int(cards.get("monopoly", 0))
+    except Exception:
+        monopoly_count = 0
+
+    # Ask in_game_strat whether it suggests a trade (we pass empty roads if not available)
+    trad = None
+    try:
+        if "in_game_strat" in globals():
+            # some implementations of in_game_strat expect (players, player_id, intersections, roads, board)
+            # but you may have a different signature — adjust if needed.
+            strat_result = in_game_strat(players, player_id, intersections, roads, board)
+            if strat_result is not None:
+                _, trad = strat_result
+    except Exception:
+        trad = None
+
+    if (plenty_count > 0 or monopoly_count > 0) and trad:
+        i_need = trad.get("i_need") if isinstance(trad, dict) else None
+        # i_need expected to be a dict like {"wheat":1} or similar
+        if i_need:
+            # pick the first missing resource
+            missing_res = None
+            if isinstance(i_need, dict):
+                for k in i_need:
+                    missing_res = k
+                    break
+            elif isinstance(i_need, list) and i_need:
+                missing_res = i_need[0]
+
+            # pick the resource we have the least of (for plenty second pick)
+            resources = player.get("resources", {}) or {}
+            # ensure all standard keys exist with 0 default
+            _keys = ["wood", "brick", "sheep", "wheat", "ore"]
+            for kk in _keys:
+                resources.setdefault(kk, 0)
+            least_res = min(resources.items(), key=lambda kv: kv[1])[0]
+
+            if plenty_count > 0:
+                # Year of Plenty gives two resources: we pick the missing and our least held resource
+                return {"action": "play_plenty", "take": [missing_res, least_res]}
+            else:
+                # Monopoly: choose the missing resource (takes all of that type)
+                return {"action": "play_monopoly", "take": missing_res}
+
+    # --- 3) TWO ROADS logic (play to reach a future settlement) ---
+    try:
+        road_card_count = int(cards.get("road", 0))
+    except Exception:
+        road_card_count = 0
+
+    if road_card_count > 0:
+        # check for a target settlement location even if not buildable now
+        try:
+            if "settlement_possible" in globals():
+                can_build, best_node = settlement_possible(player_id, roads, intersections, board)
+            else:
+                can_build, best_node = False, None
+        except Exception:
+            can_build, best_node = False, None
+
+        if best_node is not None and not can_build:
+            return {"action": "play_two_roads", "toward": best_node}
+
+    return None
+
+
+print(card_decision(0,data2.data["players"], data2.data["board"], data2.data["intersection"], data2.data["robber_tile"], data2.data["roads"]))
 
     

@@ -55,6 +55,7 @@
         <select id="decisionPlayer" style="flex:1;padding:6px;border-radius:6px"></select>
         <button id="decisionBtn">Decision</button>
         <button id="robberDecisionBtn">Robber</button>
+        <button id="cardBtn">Card</button>
       </div>
 
       <strong>Actions</strong>
@@ -482,6 +483,49 @@ document.getElementById('decisionBtn').addEventListener('click', async ()=>{
 
   alert(msg);
 });
+
+// Card button -> ask server what card to play for the selected player
+document.getElementById('cardBtn').addEventListener('click', async () => {
+  const playerId = +document.getElementById('decisionPlayer').value;
+
+  // call server
+  const res = await fetch('/api/card/decision', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ player: playerId })
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(()=>null);
+    alert('Card decision failed: ' + (txt || res.statusText));
+    return;
+  }
+
+  const data = await res.json();
+  if (!data.ok) {
+    alert('Card decision error: ' + (data.error || JSON.stringify(data)));
+    return;
+  }
+
+  const decision = data.decision;
+
+  // Nice pretty display + interpret some common fields
+  let msg = `Player ${playerId} — card decision:\n\n${JSON.stringify(decision, null, 2)}\n\n`;
+
+  // Some helpful interpretations if keys exist:
+  if (decision.card) msg += `Card to play: ${decision.card}\n`;
+  if (decision.action) msg += `Action: ${decision.action}\n`;
+  if (decision.target_tile !== undefined) msg += `Target tile: ${decision.target_tile} (${decision.tile_type||'?'}, number ${decision.tile_number||'?'})\n`;
+  if (decision.edges && Array.isArray(decision.edges)) {
+    msg += `Edges to place:\n`;
+    decision.edges.forEach(e => { msg += ` - ${e.a} → ${e.b}\n`; });
+  }
+  if (decision.play === true) msg += `Decision says: PLAY the card.\n`;
+  if (decision.play === false) msg += `Decision says: DO NOT play the card now.\n`;
+
+  alert(msg);
+});
+
 
 document.getElementById('awardLongestRoad').onclick = async ()=>{
   const pid = +document.getElementById('awardPlayer').value;

@@ -1,7 +1,7 @@
 # Flask backend for Catan (in-memory storage)
 from flask import Flask, render_template, jsonify, request
 from action import CatanGame
-from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat, robber_decision
+from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat, robber_decision, card_decision
 
 GAME = None
 
@@ -566,6 +566,33 @@ def award_largest_army():
         "ok": True,
         "largest_army": player
     })
+
+
+@app.post("/api/card/decision")
+def api_card_decision():
+    global GAME, INTERSECTIONS, BOARD, ROBBER_TILE
+    if GAME is None:
+        return jsonify({"ok": False, "error": "game not started"}), 400
+
+    data = request.get_json() or {}
+    player = data.get("player")
+    if player is None:
+        return jsonify({"ok": False, "error": "player required"}), 400
+
+    try:
+        player_id = int(player)
+    except Exception:
+        return jsonify({"ok": False, "error": "player must be integer"}), 400
+
+    try:
+        # call our strategy.card_decision
+        # we pass current server-side players, board, intersections and current robber tile
+        result = card_decision(player_id, GAME.players, BOARD, INTERSECTIONS, ROBBER_TILE)
+        # result can be None or any serializable object (dict recommended)
+        return jsonify({"ok": True, "decision": result})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ==============================
 
