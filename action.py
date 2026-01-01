@@ -1,23 +1,12 @@
-# action.py — Core Catan game logic
-import random
-
-# ====================================================================
-#  Catan Game State
-# ====================================================================
+# Actions that are implemented in the game
 class CatanGame:
     def __init__(self, board, harbours, players, intersections, roads, placements):
-        """
-        board: list of 19 hex tiles {type, number}
-        harbours: list of 9 harbour objects
-        players: list of player dicts created with CatanGame.create_player()
-        intersections: list of intersection dicts:
-            {id, adjacentHexes, neighbors, occupiedBy, type}
-        """
+
         self.board = board
         self.harbours = harbours
         self.players = players
         self.intersections = intersections
-        self.roads = roads  # {player, a, b}
+        self.roads = roads 
         self.placements = placements
         self.COSTS = {
             "road": {"wood": 1, "brick": 1},
@@ -29,9 +18,6 @@ class CatanGame:
         self.current_player_index = 0
         self.logs = []
 
-    # ----------------------------------------------------------------
-    # Player Factory
-    # ----------------------------------------------------------------
     @staticmethod
     def create_player(name, color):
         return {
@@ -52,9 +38,7 @@ class CatanGame:
             "harbours": []
         }
 
-    # ====================================================================
-    #  Development Cards
-    # ====================================================================
+
     def move_robber(self, tile_index):
         if tile_index < 0 or tile_index >= len(self.board):
             return False, "Invalid tile"
@@ -62,12 +46,10 @@ class CatanGame:
         self.robber_tile = tile_index
 
         return True, "Robber moved"
-    # ====================================================================
-    #  Dice & Resource Distribution
-    # ====================================================================
+
     def distribute_resources(self, dice_number, robber_tile):
         if dice_number == 7:
-            return []  # robber logic not implemented yet
+            return [] 
 
         events = []
 
@@ -83,39 +65,34 @@ class CatanGame:
                     if hex_index in iv.get("adjacentHexes", []):
                         p_index = iv.get("occupiedBy")
 
-                        # --- normalize occupiedBy ---
                         if p_index is None:
                             continue
-                        # handle string "None"/"" etc
+
                         if isinstance(p_index, str):
                             p_str = p_index.strip()
                             if p_str == "" or p_str.lower() == "None":
                                 continue
-                            # try to convert numeric string -> int
+                            
                             try:
                                 p_index = int(p_str)
                             except ValueError:
-                                # not a usable index
                                 continue
 
-                        # ensure we now have an integer index
                         try:
                             p_index = int(p_index)
                         except Exception:
                             continue
 
-                        # bounds check
+                    
                         if p_index < 0 or p_index >= len(self.players):
                             continue
 
                         player = self.players[p_index]
 
-                        # detect city: some places store it in iv['type'], some in iv['building']
                         is_city = (iv.get("type") == "city") or (iv.get("building") == "city")
 
                         amount = 2 if is_city else 1
 
-                        # ensure player has resources dict entry for this resource
                         if res not in player.get("resources", {}):
                             player.setdefault("resources", {}).setdefault(res, 0)
 
@@ -123,9 +100,7 @@ class CatanGame:
                         events.append(f"{player['name']} receives {amount} {res}")
         return events
 
-    # ====================================================================
-    #  Resource & Cost Helpers
-    # ====================================================================
+
     def can_afford(self, player, item):
         cost = self.COSTS[item]
         return all(player["resources"][r] >= cost[r] for r in cost)
@@ -135,9 +110,7 @@ class CatanGame:
         for r in cost:
             player["resources"][r] -= cost[r]
 
-    # ====================================================================
-    #  Building Methods
-    # ====================================================================
+
     def build_settlement(self, player_index, intersection_id):
         pl = self.players[player_index]
         iv = self.intersections[intersection_id]
@@ -145,12 +118,11 @@ class CatanGame:
         if iv["occupiedBy"] != "None":
             return False, "Intersection already taken"
 
-        # check spacing (no adjacent settlements)
         for nid in iv.get("neighbors", []):
             neighbor = self.intersections[nid]
             if neighbor["occupiedBy"] != "None":
                 return False, "Too close to another settlement"
-        # must connect to one of player's roads
+
         connected = False
         for r in self.roads:
             if r["player"] == player_index and (
@@ -202,14 +174,12 @@ class CatanGame:
             return False, "Cannot afford road"
         connected = False
 
-        # check settlement/city
         for iv in self.intersections:
             if iv["occupiedBy"] == player_index:
                 if iv["id"] == a or iv["id"] == b:
                     connected = True
                     break
 
-        # check existing roads
         if not connected:
             for r in self.roads:
                 if r["player"] == player_index and (
@@ -233,68 +203,20 @@ class CatanGame:
         self.roads.append({"player": player_index, "a": a, "b": b})
         return True, "Road built"
 
-    # ====================================================================
-    #  Trading
-    # ====================================================================
-    def bank_trade(self, player_index, give, receive):
-        pl = self.players[player_index]
-        rate = 4
-        if "3:1" in pl["harbours"]:
-            rate = 3
-        if give in pl["harbours"]:
-            rate = 2
 
-        if pl["resources"][give] < rate:
-            return False, f"Need {rate} {give}"
-
-        pl["resources"][give] -= rate
-        pl["resources"][receive] += 1
-        return True, f"Traded {rate} {give} for 1 {receive}"
-
-    def player_trade(self, A, B, offer, request):
-        pA = self.players[A]
-        pB = self.players[B]
-
-        # verify offer/request
-        for r, amt in offer.items():
-            if pA["resources"][r] < amt:
-                return False, "Player A cannot afford trade"
-        for r, amt in request.items():
-            if pB["resources"][r] < amt:
-                return False, "Player B cannot afford trade"
-
-        # execute trade
-        for r, amt in offer.items():
-            pA["resources"][r] -= amt
-            pB["resources"][r] += amt
-        for r, amt in request.items():
-            pB["resources"][r] -= amt
-            pA["resources"][r] += amt
-
-        return True, "Trade complete"
-
-    # ====================================================================
-    #  Initial Resource Distribution
-    # ====================================================================
     def distribute_initial_resources(self, placements):
-        """
-        Give starting resources ONLY from each player's second settlement.
-        placements = [{player:int, intersection:int}, ...] in chronological order
-        """
 
         events = []
 
         if not placements:
-            return events  # do nothing if somehow empty
+            return events 
 
-        # Determine the last (2nd) settlement for each player
         last_by_player = {}
         for rec in placements:
             p = int(rec.get("player"))
             inter = int(rec.get("intersection"))
             last_by_player[p] = inter
 
-        # Give resources from the last settlement only
         for p_index, inter_id in last_by_player.items():
             if inter_id < 0 or inter_id >= len(self.intersections):
                 continue

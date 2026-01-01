@@ -1,10 +1,10 @@
+# Here are the bot decisions made
 import data, data2
 import pulp as pl
 
-# Create LP problem: choose Maximize or Minimize
+
 prob = pl.LpProblem("City_Optimized_Weights", pl.LpMaximize)
 
-# Decision variables = resource weights
 a = pl.LpVariable("ore",   lowBound=0, upBound=10)
 b = pl.LpVariable("wheat", lowBound=0, upBound=10)
 c = pl.LpVariable("sheep", lowBound=0, upBound=10)
@@ -12,10 +12,9 @@ d = pl.LpVariable("wood",  lowBound=0, upBound=10)
 e = pl.LpVariable("brick", lowBound=0, upBound=10)
 
 
-# Objective = prioritize city resources but not insanely
 prob += 3*a + 2*b - c - d - e, "City_Strategy_Objective"
 
-# Priority structure
+# Done by examples of decisions
 
 prob += 5*d + 5*e + 5*c >= 4*a + 7*b
 prob += 4*a + 7*b >= 5*c + 4*d + 4*e
@@ -71,19 +70,18 @@ def look_at_board(board):
     return res_on_turn
 
 
-
+# Deciding the first two settlment is the most important part in Catan, the bot decision is based on the strategy chosen for the game
 def first_two_settlements(strategy, intersections, board, player=None):
    
     local_strategy = dict(strategy)
 
-    # --- If the player already has a settlement, reduce weights for resources
-    #     adjacent to that settlement by 2 (to encourage complementary 2nd placement)
     if player is not None:
         owned_settlements = [
         iv for iv in intersections
         if iv.get("occupiedBy") == player and iv.get("type") == "settlement"
         ]
     
+    # Penalty for the resources already occupied
     if len(owned_settlements) >= 1:
         first_iv = owned_settlements[0]
 
@@ -92,25 +90,22 @@ def first_two_settlements(strategy, intersections, board, player=None):
                 tile = board[hi]
                 if tile and tile.get("type") in local_strategy:
 
-                    # --- determine probability (based on tile number)
                     num = tile.get("number")
                     if num is not None and 2 <= num <= 12:
-                        p = (6 - abs(num - 7)) / 36   # probability of rolling this number
+                        p = (6 - abs(num - 7)) / 36 
                     else:
                         p = 0
 
-                    # --- subtract 3/4 * probability * 36 = 27 * p
                     penalty = 27 * p
                     local_strategy[tile["type"]] = (local_strategy.get(tile["type"], 0) - penalty)
-    # --- Build tile lists for each intersection (max 3 tiles; pad with None)
+
+    # Calculating the scores of each intersection
     intersection_tiles = []
     for iv in intersections:
-        # if occupied or blocked by adjacent occupied → mark as unusable
         occ = iv.get("occupiedBy")
         if occ not in (None, "None"):
             intersection_tiles.append([None, None, None])
             continue
-
 
         blocked = False
         for nid in iv.get("neighbors", []):
@@ -134,17 +129,11 @@ def first_two_settlements(strategy, intersections, board, player=None):
         while len(tiles) < 3:
             tiles.append(None)
 
-        # If this intersection has a harbour (harbor / harbour) and the harbour value
-        # is not the string "None", we'll treat missing tiles as a small harbor bonus.
-
         intersection_tiles.append(tiles)
 
-    # --- Score each intersection ---
-    # --- Score each intersection ---
     scores = []
     for idx, tiles in enumerate(intersection_tiles):
 
-        # unusable intersection
         if tiles == [None, None, None]:
             scores.append(0)
             continue
@@ -156,7 +145,6 @@ def first_two_settlements(strategy, intersections, board, player=None):
         if hv is not None and hv != "None":
             total += 15
 
-        # score all real tiles
         for tile in tiles:
             if tile is None or tile.get("type") == "desert":
                 continue
@@ -164,7 +152,6 @@ def first_two_settlements(strategy, intersections, board, player=None):
             num = tile.get("number")
             typ = tile.get("type")
 
-            # number probabilities
             if num in (2, 12): num_score = 1
             elif num in (3, 11): num_score = 2
             elif num in (4, 10): num_score = 3
@@ -178,18 +165,11 @@ def first_two_settlements(strategy, intersections, board, player=None):
         scores.append(total)
 
 
-    # --- choose highest score index (ties -> first max)
     if not scores:
         return 0
     winner = max(range(len(scores)), key=lambda i: scores[i])
 
-
-        # --------------------------------------------------
-    # ROAD DECISION:
-    # Pick the best intersection two steps away
-    # --------------------------------------------------
-
-    # winner is already defined above
+    # Road decision
     start = winner
     neighbors = intersections[start].get("neighbors", [])
 
@@ -203,7 +183,6 @@ def first_two_settlements(strategy, intersections, board, player=None):
         iv_n = intersections[n]
         occ = iv_n.get("occupiedBy")
 
-        # must be empty
         if occ not in (None, "None"):
             continue
 
@@ -215,12 +194,13 @@ def first_two_settlements(strategy, intersections, board, player=None):
 
     return winner, road_target
 
+# Robber decisions finds the player with most VP and the location of the intersaction where he gains the most
 def robber_decision(player_id, players, board, intersections, robber_tile=None):
     
     DICE_PROB = {
     2: 1, 3: 2, 4: 3, 5: 4, 6: 5,
     8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
-    # --- 1. Find strongest opponent ---
+
     opponents = [
         (i, p) for i, p in enumerate(players)
         if i != player_id

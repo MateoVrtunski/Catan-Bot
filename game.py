@@ -1,4 +1,4 @@
-# Flask backend for Catan (in-memory storage)
+# Main python file linking the other files together with the html files
 from flask import Flask, render_template, jsonify, request
 from action import CatanGame
 from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat, robber_decision, card_decision
@@ -7,17 +7,18 @@ GAME = None
 
 app = Flask(__name__, template_folder='templates')
 
-# === In-memory state ===
-BOARD = []           # List of 19 tile objects
-HARBOURS = []        # List of 9 harbour objects
-PLAYERS = []         # [{name, color}, ...]
-PLACEMENTS = []      # placement records
-ROADS = []   # list of {player:int, a:int, b:int}
+
+BOARD = []           
+HARBOURS = []        
+PLAYERS = []         
+PLACEMENTS = []      
+ROADS = []  
 INTERSECTIONS = []
 ROBBER_TILE = 9
 LONGEST_ROAD_OWNER = None   
 LARGEST_ARMY_OWNER = None 
-# ========== ROUTES ==========
+
+# Routes
 
 @app.route("/")
 def index():
@@ -35,7 +36,6 @@ def placement_page():
 def catan_page():
     return render_template("catan.html")
 
-# ========= BOARD API =========
 
 @app.get("/api/board")
 def api_get_board():
@@ -67,9 +67,6 @@ def api_save_board():
         return str(e), 400
 
 
-
-# ========= PLAYERS API =========
-
 @app.get("/api/players")
 def api_get_players():
     return jsonify(PLAYERS)
@@ -94,8 +91,6 @@ def api_save_players():
     return jsonify({"ok": True, "players": PLAYERS}), 200
 
 
-# ========= GAME STATE =========
-
 @app.get("/api/state")
 def api_state():
     return jsonify({
@@ -110,16 +105,11 @@ def api_state():
         "largest_army": LARGEST_ARMY_OWNER
     })
 
-
-# ========= PLACEMENT PHASE =========
+# Bot placement
+ 
 @app.get("/api/decision")
 def api_decision():
-    """
-    Return decision for initial placement for a given player.
-    Query param: player (int)
-    Calls strategy.first_two_settlements(strategy, INTERSECTIONS, BOARD, player)
-    Returns JSON: {"ok": True, "settlement": <idx>, "road": <idx|null>, "error": <msg?>}
-    """
+
     global BOARD, INTERSECTIONS
     if first_two_settlements is None:
         return jsonify({"ok": False, "error": "strategy module or function not available on server"}), 500
@@ -133,29 +123,17 @@ def api_decision():
     except Exception:
         return jsonify({"ok": False, "error": "player must be an integer"}), 400
 
-    # Defensive: ensure we have board and intersections
     if not isinstance(BOARD, list) or not isinstance(INTERSECTIONS, list):
         return jsonify({"ok": False, "error": "server board or intersections not ready"}), 500
 
-    # Call the strategy function. We pass STRATEGY dict (if available) and the server lists.
     try:
-        # strategy function signature expected: (strategy, intersections, board, player=None)
         result = first_two_settlements(STRATEGY, INTERSECTIONS, BOARD, player=player_id)
-        # result expected as (settlement_idx, road_idx) or similar
         if isinstance(result, tuple) or isinstance(result, list):
             settlement_idx = result[0]
             road_idx = result[1] if len(result) > 1 else None
         else:
-            # allow functions that return dict
             settlement_idx = result.get("settlement") if isinstance(result, dict) else None
             road_idx = result.get("road") if isinstance(result, dict) else None
-
-        print("=== DEBUG ===")
-        print("PLAYER:", player_id)
-        print("BOARD FROM SERVER:", BOARD)
-        print("INTERSECTIONS FROM SERVER:", INTERSECTIONS[:5], "... total =", len(INTERSECTIONS))
-        print("STRATEGY:", STRATEGY)
-        print("=== END DEBUG ===")
         
         return jsonify({"ok": True, "settlement": settlement_idx, "road": road_idx})
     except Exception as e:
@@ -173,14 +151,12 @@ def api_place():
     if player is None or intersection is None:
         return "player and intersection required", 400
 
-    # Save placement
     PLACEMENTS.append({
         "player": int(player),
         "intersection": int(intersection),
         "type": "settlement"
     })
 
-    # Only update server intersections if we already have them
     for iv in INTERSECTIONS:
         if iv["id"] == int(intersection):
             iv["occupiedBy"] = int(player)
@@ -208,7 +184,6 @@ def api_save_road():
         "b": int(b)
     }
 
-    # Prevent duplicates
     for r in ROADS:
         if (r["a"] == road["a"] and r["b"] == road["b"]) or (r["a"] == road["b"] and r["b"] == road["a"]):
             return jsonify({"error": "road already exists"}), 400
@@ -241,7 +216,6 @@ def api_start_game():
     global GAME
 
     try:
-        # FIX: ensure placements & roads are included
         if not PLACEMENTS:
             return jsonify({"error": "No starting settlements"}), 400
         if not ROADS:
@@ -265,7 +239,7 @@ def api_start_game():
         return jsonify({"error": str(e)}), 500
 
 
-# ---------- Game action endpoints ----------
+# Game actions
 
 @app.post("/api/roll")
 def api_roll():
@@ -308,7 +282,6 @@ def api_set_resources():
 
     p = PLAYERS[pid]
 
-    # update resources
     res = data.get("resources", {})
     for k in ["wood","brick","sheep","wheat","ore"]:
         try:
@@ -316,14 +289,12 @@ def api_set_resources():
         except Exception:
             p["resources"][k] = 0
 
-    # victory points (optional)
     if "victory_points" in data:
         try:
             p["victory_points"] = int(data.get("victory_points", p.get("victory_points", 0)))
         except Exception:
             p["victory_points"] = p.get("victory_points", 0)
 
-    # dev cards (optional) -> merge/replace into p["dev_cards"]
     if "dev_cards" in data:
         if "dev_cards" not in p or not isinstance(p.get("dev_cards"), dict):
             p["dev_cards"] = {}
@@ -356,14 +327,11 @@ def api_build_settlement():
         if not ok:
             return jsonify({"error": msg}), 400
 
-        # --- Update INTERSECTIONS (always correct) ---
-        # We assume server intersections ALWAYS use id == index
         iv = INTERSECTIONS[intersection]
         iv["occupiedBy"] = player
         iv["type"] = "settlement"
-        iv["building"] = "settlement"   # ensures frontend sees it!
+        iv["building"] = "settlement"  
 
-        # --- Update PLACEMENTS with correct type ---
         PLACEMENTS.append({
             "player": player,
             "intersection": intersection,
@@ -392,12 +360,10 @@ def api_build_city():
         if not ok:
             return jsonify({"error": msg}), 400
 
-        # --- Update intersection state ---
         iv = INTERSECTIONS[intersection]
         iv["type"] = "city"
         iv["building"] = "city"
 
-        # --- Update PLACEMENTS entry for that intersection ---
         updated = False
         for p in PLACEMENTS:
             if p["intersection"] == intersection and p["player"] == player:
@@ -405,7 +371,6 @@ def api_build_city():
                 updated = True
                 break
 
-        # If, for some reason, no placement existed, add it
         if not updated:
             PLACEMENTS.append({
                 "player": player,
@@ -422,7 +387,7 @@ def api_build_city():
 
 
 @app.post("/api/build/road")
-@app.post("/api/road")   # accept both for placement and in-game
+@app.post("/api/road")   
 def api_build_road():
     """Build a road: body {player:int, a:int, b:int}"""
     global GAME, ROADS
@@ -438,7 +403,6 @@ def api_build_road():
         if not ok:
             return jsonify({"error": msg}), 400
 
-        # append to global ROADS so /api/state shows them
         ROADS.append({"player": player, "a": a, "b": b})
         return jsonify({"ok": True, "road": {"player": player, "a": a, "b": b}, "message": msg}), 200
     except Exception as e:
@@ -529,11 +493,9 @@ def award_longest_road():
 
     player = int(player)
 
-    # Remove VP from previous owner
     if LONGEST_ROAD_OWNER is not None:
         PLAYERS[LONGEST_ROAD_OWNER]["victory_points"] -= 2
 
-    # Assign new owner
     LONGEST_ROAD_OWNER = player
     PLAYERS[player]["victory_points"] += 2
 
@@ -554,11 +516,9 @@ def award_largest_army():
 
     player = int(player)
 
-    # Remove VP from previous owner
     if LARGEST_ARMY_OWNER is not None:
         PLAYERS[LARGEST_ARMY_OWNER]["victory_points"] -= 2
 
-    # Assign new owner
     LARGEST_ARMY_OWNER = player
     PLAYERS[player]["victory_points"] += 2
 
@@ -585,16 +545,13 @@ def api_card_decision():
         return jsonify({"ok": False, "error": "player must be integer"}), 400
 
     try:
-        # call our strategy.card_decision
-        # we pass current server-side players, board, intersections and current robber tile
         result = card_decision(player_id, GAME.players, BOARD, INTERSECTIONS, ROBBER_TILE)
-        # result can be None or any serializable object (dict recommended)
         return jsonify({"ok": True, "decision": result})
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ==============================
+# Main 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
