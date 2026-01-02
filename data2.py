@@ -303,7 +303,8 @@ data = {
         5,
         15
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 2,
+      "type": "settlement",
       "x": -142.89419162443235,
       "y": 27.499999999999996
     },
@@ -334,7 +335,8 @@ data = {
         7,
         14
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 1,
+      "type": "settlement",
       "x": -95.26279441628824,
       "y": -110
     },
@@ -351,8 +353,7 @@ data = {
         8,
         18
       ],
-      "occupiedBy": 2,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": -95.26279441628824,
       "y": -55
     },
@@ -386,8 +387,7 @@ data = {
         9,
         19
       ],
-      "occupiedBy": 2,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": -95.26279441628824,
       "y": 110
     },
@@ -532,7 +532,8 @@ data = {
         33,
         28
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 0,
+      "type": "settlement",
       "x": 3.3677786976552213e-15,
       "y": -110
     },
@@ -597,7 +598,8 @@ data = {
         19,
         31
       ],
-      "occupiedBy": "None",
+      "occupiedBy": 2,
+      "type": "settlement",
       "x": 7.105427357601002e-15,
       "y": 110
     },
@@ -631,8 +633,7 @@ data = {
         40,
         35
       ],
-      "occupiedBy": 1,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": 47.63139720814412,
       "y": 137.5
     },
@@ -665,8 +666,7 @@ data = {
         25,
         37
       ],
-      "occupiedBy": 1,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": 47.63139720814413,
       "y": -137.5
     },
@@ -747,7 +747,7 @@ data = {
         30,
         44
       ],
-      "occupiedBy": 0,
+      "occupiedBy": 1,
       "type": "settlement",
       "x": 95.26279441628824,
       "y": -55
@@ -900,7 +900,6 @@ data = {
         11,
         15
       ],
-      "building": "settlement",
       "harbor": "None",
       "id": 48,
       "neighbors": [
@@ -908,8 +907,7 @@ data = {
         53,
         51
       ],
-      "occupiedBy": 0,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": 190.5255888325765,
       "y": 55
     },
@@ -932,7 +930,6 @@ data = {
         6,
         11
       ],
-      "building": "settlement",
       "harbor": "None",
       "id": 50,
       "neighbors": [
@@ -940,8 +937,7 @@ data = {
         44,
         52
       ],
-      "occupiedBy": 0,
-      "type": "settlement",
+      "occupiedBy": "None",
       "x": 190.52558883257652,
       "y": -55
     },
@@ -992,42 +988,32 @@ data = {
   "longest_road": None,
   "placements": [
     {
-      "intersection": 38,
+      "intersection": 25,
       "player": 0,
       "type": "settlement"
     },
     {
-      "intersection": 31,
+      "intersection": 38,
       "player": 1,
       "type": "settlement"
     },
     {
-      "intersection": 16,
+      "intersection": 29,
       "player": 2,
       "type": "settlement"
     },
     {
-      "intersection": 14,
+      "intersection": 11,
       "player": 2,
       "type": "settlement"
     },
     {
-      "intersection": 33,
+      "intersection": 13,
       "player": 1,
       "type": "settlement"
     },
     {
       "intersection": 39,
-      "player": 0,
-      "type": "settlement"
-    },
-    {
-      "intersection": 50,
-      "player": 0,
-      "type": "settlement"
-    },
-    {
-      "intersection": 48,
       "player": 0,
       "type": "settlement"
     }
@@ -1041,20 +1027,20 @@ data = {
         "monopoly": 0,
         "plenty": 0,
         "point": 0,
-        "road": 0
+        "road": 1
       },
       "harbours": [],
-      "name": "jean",
+      "name": "candamir",
       "resources": {
-        "brick": 1,
+        "brick": 0,
         "ore": 0,
-        "sheep": 0,
-        "wheat": 0,
+        "sheep": 1,
+        "wheat": 1,
         "wood": 1
       },
-      "roads_left": 11,
-      "settlements_left": 1,
-      "victory_points": 4
+      "roads_left": 13,
+      "settlements_left": 3,
+      "victory_points": 2
     },
     {
       "cities_left": 4,
@@ -1063,11 +1049,11 @@ data = {
       "harbours": [],
       "name": "me",
       "resources": {
-        "brick": 0,
-        "ore": 0,
-        "sheep": 2,
-        "wheat": 0,
-        "wood": 1
+        "brick": 1,
+        "ore": 1,
+        "sheep": 0,
+        "wheat": 1,
+        "wood": 0
       },
       "roads_left": 13,
       "settlements_left": 3,
@@ -1078,13 +1064,13 @@ data = {
       "color": "green",
       "dev_cards": [],
       "harbours": [],
-      "name": "candamir",
+      "name": "jean",
       "resources": {
-        "brick": 1,
+        "brick": 0,
         "ore": 0,
         "sheep": 0,
         "wheat": 1,
-        "wood": 1
+        "wood": 2
       },
       "roads_left": 13,
       "settlements_left": 3,
@@ -1093,53 +1079,33 @@ data = {
   ],
   "roads": [
     {
-      "a": 38,
-      "b": 44,
+      "a": 25,
+      "b": 33,
       "player": 0
     },
     {
-      "a": 31,
-      "b": 29,
+      "a": 38,
+      "b": 44,
       "player": 1
     },
     {
-      "a": 16,
-      "b": 15,
+      "a": 29,
+      "b": 19,
       "player": 2
     },
     {
-      "a": 14,
-      "b": 13,
+      "a": 11,
+      "b": 8,
       "player": 2
     },
     {
-      "a": 33,
-      "b": 37,
+      "a": 13,
+      "b": 14,
       "player": 1
     },
     {
       "a": 39,
       "b": 45,
-      "player": 0
-    },
-    {
-      "a": 48,
-      "b": 45,
-      "player": 0
-    },
-    {
-      "a": 48,
-      "b": 45,
-      "player": 0
-    },
-    {
-      "a": 50,
-      "b": 44,
-      "player": 0
-    },
-    {
-      "a": 50,
-      "b": 44,
       "player": 0
     }
   ],

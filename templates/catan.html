@@ -522,6 +522,12 @@ document.getElementById('cardBtn').addEventListener('click', async () => {
   }
   if (decision.play === true) msg += `Decision says: PLAY the card.\n`;
   if (decision.play === false) msg += `Decision says: DO NOT play the card now.\n`;
+  if (decision.path && Array.isArray(decision.path)) {
+  msg += `Road path:\n`;
+  for (let i = 0; i < decision.path.length - 1; i++) {
+    msg += ` - ${decision.path[i]} → ${decision.path[i+1]}\n`;
+  }
+}
 
   alert(msg);
 });

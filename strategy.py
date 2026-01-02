@@ -290,26 +290,34 @@ def settlement_possible(player_id, roads, intersections, board):
             return 0.0
         return (6 - abs(number - 7)) / 36.0
 
-    HARBOUR_VALUE = 3 / 36.0
+    from collections import deque
+
+    player_has_harbor = False
+    for iv in intersections:
+        if iv.get("occupiedBy") == player_id:
+            hv = iv.get("harbor", iv.get("harbour", None))
+            if hv not in (None, "None"):
+                player_has_harbor = True
+                break
+
+    BASE_HARBOUR_VALUE = 3 / 36.0
+    HARBOUR_VALUE = 0.0 if player_has_harbor else BASE_HARBOUR_VALUE
 
     player_roads = [r for r in roads if r.get("player") == player_id]
 
     if not player_roads:
         return False, None
 
-    endpoints = set()
+    # collect all nodes that appear in any player's road (ignore None)
+    road_nodes = set()
     for r in player_roads:
         a = r.get("a"); b = r.get("b")
-        if a is not None: endpoints.add(a)
-        if b is not None: endpoints.add(b)
+        if a is not None:
+            road_nodes.add(a)
+        if b is not None:
+            road_nodes.add(b)
 
-    adjacency = {}
-    for r in player_roads:
-        a = r.get("a"); b = r.get("b")
-        if a is None or b is None: continue
-        adjacency.setdefault(a, set()).add(b)
-        adjacency.setdefault(b, set()).add(a)
-
+    # helper: intersection occupied checks
     def is_occupied_by_any(iv):
         occ = iv.get("occupiedBy")
         return occ is not None and occ != "None"
@@ -318,9 +326,11 @@ def settlement_possible(player_id, roads, intersections, board):
         occ = iv.get("occupiedBy")
         return occ == pid
 
-    endpoints = {n for n in endpoints if 0 <= n < len(intersections) and not is_occupied_by_player(intersections[n], player_id)}
+    # endpoints used later (filter out indices out of range and nodes already occupied by player)
+    endpoints = {n for n in road_nodes if 0 <= n < len(intersections) and not is_occupied_by_player(intersections[n], player_id)}
 
-    buildable_now = []   
+    # 1) Check buildable now from the road endpoints themselves
+    buildable_now = []
     scored_future_candidates = []
 
     for node in sorted(endpoints):
@@ -329,8 +339,10 @@ def settlement_possible(player_id, roads, intersections, board):
         iv = intersections[node]
 
         if is_occupied_by_any(iv):
+            # can't build on an occupied intersection
             pass
 
+        # rule: no adjacent occupied intersections
         neighbor_blocked = False
         for n in iv.get("neighbors", []):
             if 0 <= n < len(intersections):
@@ -338,6 +350,7 @@ def settlement_possible(player_id, roads, intersections, board):
                     neighbor_blocked = True
                     break
 
+        # compute score (tile probabilities + harbour)
         score = 0.0
         for hi in iv.get("adjacentHexes", []):
             if 0 <= hi < len(board):
@@ -359,6 +372,7 @@ def settlement_possible(player_id, roads, intersections, board):
         best_score, best_node = buildable_now[0]
         return True, best_node
 
+    # 2) Look at distance-1 candidates (neighbors of endpoints, excluding endpoints themselves)
     neighbor_candidates = set()
     for node in endpoints:
         iv = intersections[node]
@@ -368,42 +382,86 @@ def settlement_possible(player_id, roads, intersections, board):
 
     neighbor_candidates = {n for n in neighbor_candidates if 0 <= n < len(intersections) and n not in endpoints}
 
-    scored_neighbors = []
-    for node in sorted(neighbor_candidates):
-        iv = intersections[node]
-        if is_occupied_by_any(iv):
-            continue
+    def score_and_filter(candidate_nodes):
+        """Given iterable of nodes, apply occupancy and adjacency rules and return scored list."""
+        scored = []
+        for node in sorted(candidate_nodes):
+            iv = intersections[node]
+            if is_occupied_by_any(iv):
+                continue
 
-        blocked_by_neighbor = False
-        for nn in iv.get("neighbors", []):
-            if 0 <= nn < len(intersections):
-                if is_occupied_by_any(intersections[nn]):
-                    blocked_by_neighbor = True
-                    break
-        if blocked_by_neighbor:
-            continue
+            blocked_by_neighbor = False
+            for nn in iv.get("neighbors", []):
+                if 0 <= nn < len(intersections):
+                    if is_occupied_by_any(intersections[nn]):
+                        blocked_by_neighbor = True
+                        break
+            if blocked_by_neighbor:
+                continue
 
-        score = 0.0
-        for hi in iv.get("adjacentHexes", []):
-            if 0 <= hi < len(board):
-                tile = board[hi]
-                if tile:
-                    score += tile_probability(tile.get("number"))
-        hv = iv.get("harbor", iv.get("harbour", None))
-        if hv not in (None, "None"):
-            score += HARBOUR_VALUE
+            score = 0.0
+            for hi in iv.get("adjacentHexes", []):
+                if 0 <= hi < len(board):
+                    tile = board[hi]
+                    if tile:
+                        score += tile_probability(tile.get("number"))
+            hv = iv.get("harbor", iv.get("harbour", None))
+            if hv not in (None, "None"):
+                score += HARBOUR_VALUE
 
-        scored_neighbors.append((score, node))
+            scored.append((score, node))
+        return scored
+
+    scored_neighbors = score_and_filter(neighbor_candidates)
 
     if scored_neighbors:
         scored_neighbors.sort(reverse=True, key=lambda x: (x[0], x[1]))
         return False, scored_neighbors[0][1]
 
+    # 3) FALLBACK: if no distance-1 candidates, try distance-2 (BFS up to depth 2 from road_nodes)
+    # (this implements your "range of 2" fallback while keeping the same occupancy/neighbour rules)
+    distance2_candidates = set()
+    for start in road_nodes:
+        if not (0 <= start < len(intersections)):
+            continue
+        # BFS up to depth 2
+        q = deque([(start, 0)])
+        visited = {start}
+        while q:
+            node, dist = q.popleft()
+            if dist >= 2:
+                continue
+            iv = intersections[node]
+            for nb in iv.get("neighbors", []):
+                if not (0 <= nb < len(intersections)):
+                    continue
+                if nb in visited:
+                    continue
+                visited.add(nb)
+                nd = dist + 1
+                if nd == 2:
+                    # exclude original road nodes (we want nodes two steps away, not the road nodes themselves)
+                    if nb not in road_nodes:
+                        distance2_candidates.add(nb)
+                else:
+                    q.append((nb, nd))
+
+    # remove nodes already considered (endpoints or immediate neighbors)
+    distance2_candidates = {n for n in distance2_candidates if n not in endpoints and n not in neighbor_candidates}
+
+    scored_distance2 = score_and_filter(distance2_candidates)
+
+    if scored_distance2:
+        scored_distance2.sort(reverse=True, key=lambda x: (x[0], x[1]))
+        return False, scored_distance2[0][1]
+
+    # 4) final fallback: return best future candidate from the originally-scored endpoints
     if scored_future_candidates:
         scored_future_candidates.sort(reverse=True, key=lambda x: (x[0], x[1]))
         return False, scored_future_candidates[0][1]
 
     return False, None
+
 
 
 def city_placement(player_id, intersections, board):
@@ -492,7 +550,7 @@ def in_game_strat(players, player_id, intersections, roads, board):
 
     missing_set, extra_set = compute_missing_and_extra(settlement_cost)
     if player["settlements_left"] > 0 and t == True and sum(missing_set.values()) == 1 and len(extra_set) > 0:
-        strategy_1 = {"settlement or road to": set_loc}
+        strategy_1 = {"settlement": set_loc}
         trad = {"i_need": missing_set, "i_give": extra_set}
         return strategy_1, trad
     
@@ -517,9 +575,28 @@ def in_game_strat(players, player_id, intersections, roads, board):
         strategy_1 = {"road": set_loc}
         trad = {"i_need": missing_road, "i_give": extra_road}
         return strategy_1, trad
+    
+    total_res = sum(resources.values())
+
+    if total_res > 7:
+        i_give = {}
+        i_need = {}
+
+        for res, amt in resources.items():
+            if amt > 3:
+                # give surplus (cap to 2 per resource)
+                i_give[res] = min(amt - 3, 2)
+            elif amt <= 1:
+                i_need[res] = 1
+
+        # only suggest trade if it makes sense
+        if i_give and i_need:
+            return {}, {"i_need": i_need, "i_give": i_give}
+
+    # ---------- 4) Do nothing ----------
+    return {}, {"i_need": None, "i_give": None}
 
     
-    return strategy_1, trad
 
 print(settlement_possible(0,data2.data["roads"],data2.data["intersection"], data2.data["board"]))
 
@@ -623,26 +700,156 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
                 # Monopoly: choose the missing resource (takes all of that type)
                 return {"action": "play_monopoly", "take": missing_res}
 
-    # --- 3) TWO ROADS logic (play to reach a future settlement) ---
+           # --- 3) TWO ROADS logic (CORRECT, settlement-aligned) ---
     try:
         road_card_count = int(cards.get("road", 0))
     except Exception:
         road_card_count = 0
 
-    if road_card_count > 0:
-        # check for a target settlement location even if not buildable now
-        try:
-            if "settlement_possible" in globals():
-                can_build, best_node = settlement_possible(player_id, roads, intersections, board)
-            else:
-                can_build, best_node = False, None
-        except Exception:
-            can_build, best_node = False, None
+    if road_card_count <= 0:
+        return None
 
-        if best_node is not None and not can_build:
-            return {"action": "play_two_roads", "toward": best_node}
+    # settlement_possible already encodes legality + best target
+    try:
+        can_build, target = settlement_possible(player_id, roads, intersections, board)
+    except Exception:
+        return None
+
+    if target is None or can_build:
+        return None
+
+    from collections import deque
+
+    # build adjacency graph from intersections
+    adj = {
+        i: set(iv.get("neighbors", []))
+        for i, iv in enumerate(intersections)
+    }
+
+    # collect player road nodes + existing edges
+    player_nodes = set()
+    existing_edges = set()
+    for r in roads:
+        a, b = r.get("a"), r.get("b")
+        if a is None or b is None:
+            continue
+        existing_edges.add(tuple(sorted((a, b))))
+        if r.get("player") == player_id:
+            player_nodes.update([a, b])
+
+    def edge_free(a, b):
+        return tuple(sorted((a, b))) not in existing_edges
+
+    def passable(n):
+        occ = intersections[n].get("occupiedBy")
+        return occ in (None, "None", player_id)
+
+    def blocked_by_neighbor(n):
+        for nb in intersections[n].get("neighbors", []):
+            if 0 <= nb < len(intersections):
+                occ = intersections[nb].get("occupiedBy")
+                if occ not in (None, "None", player_id):
+                    return True
+        return False
+
+    # --- BFS from player's road network (depth ≤ 2) ---
+    q = deque()
+    parent = {}
+    dist = {}
+
+    for s in player_nodes:
+        q.append(s)
+        dist[s] = 0
+        parent[s] = None
+
+    found = False
+    while q:
+        cur = q.popleft()
+        if dist[cur] == 2:
+            continue
+        for nb in adj[cur]:
+            if nb in dist:
+                continue
+            if not edge_free(cur, nb):
+                continue
+            if not passable(nb):
+                continue
+            if blocked_by_neighbor(nb):
+                continue
+            dist[nb] = dist[cur] + 1
+            parent[nb] = cur
+            if nb == target:
+                found = True
+                q.clear()
+                break
+            q.append(nb)
+
+    if not found:
+        return None
+
+    # --- reconstruct path ---
+    path = []
+    n = target
+    while parent[n] is not None:
+        path.append((parent[n], n))
+        n = parent[n]
+    path.reverse()
+
+    # path length determines behavior
+    if len(path) == 2:
+        # perfect: exactly two roads to target
+        return {
+            "action": "play_two_roads",
+            "edges": [{"a": a, "b": b} for a, b in path]
+        }
+
+    if len(path) == 1:
+        # one road to target → add best second road
+        first_edge = path[0]
+        new_nodes = set(player_nodes)
+        new_nodes.add(first_edge[1])
+        new_edges = set(existing_edges)
+        new_edges.add(tuple(sorted(first_edge)))
+
+        best_second = None
+        best_score = -1
+
+        def settlement_score(n):
+            score = 0.0
+            for hi in intersections[n].get("adjacentHexes", []):
+                if 0 <= hi < len(board):
+                    tile = board[hi]
+                    if tile and tile.get("number"):
+                        score += (6 - abs(tile["number"] - 7)) / 36.0
+            if intersections[n].get("harbor") not in (None, "None"):
+                score += 3 / 36.0
+            return score
+
+        for a in new_nodes:
+            for b in adj[a]:
+                if tuple(sorted((a, b))) in new_edges:
+                    continue
+                if not passable(b):
+                    continue
+                if blocked_by_neighbor(b):
+                    continue
+                sc = settlement_score(b)
+                if sc > best_score:
+                    best_score = sc
+                    best_second = (a, b)
+
+        if best_second:
+            return {
+                "action": "play_two_roads",
+                "edges": [
+                    {"a": first_edge[0], "b": first_edge[1]},
+                    {"a": best_second[0], "b": best_second[1]},
+                ]
+            }
 
     return None
+
+
 
 
 print(card_decision(0,data2.data["players"], data2.data["board"], data2.data["intersection"], data2.data["robber_tile"], data2.data["roads"]))
