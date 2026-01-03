@@ -604,6 +604,11 @@ def in_game_strat(players, player_id, intersections, roads, board):
         trad = {"i_need": missing_card, "i_give": extra_card, "i_need_2": missing_road, "i_give_2": extra_road}
         return strategy_1, trad
     
+    if card_clause:
+        strategy_1 = {"card": None}
+        trad = {"i_need": missing_card, "i_give": extra_card}
+        return strategy_1, trad
+    
     if can_afford(player, road_cost) and t == False:
         strategy_1 = {"road": set_loc}
         trad = {"i_need": None, "i_give": None}
@@ -684,7 +689,9 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
     except Exception:
         # don't crash; fall through to other cards
         pass
+    
 
+    t,set_loc = settlement_possible(player_id, roads, intersections, board)
     # --- 2) YEAR OF PLENTY / MONOPOLY logic ---
     try:
         plenty_count = int(cards.get("plenty", 0))
@@ -707,33 +714,64 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
     except Exception:
         trad = None
 
-    if (plenty_count > 0 or monopoly_count > 0) and trad:
-        i_need = trad.get("i_need") if isinstance(trad, dict) else None
-        # i_need expected to be a dict like {"wheat":1} or similar
-        if i_need:
-            # pick the first missing resource
-            missing_res = None
-            if isinstance(i_need, dict):
-                for k in i_need:
-                    missing_res = k
-                    break
-            elif isinstance(i_need, list) and i_need:
-                missing_res = i_need[0]
+    if (plenty_count > 0 or monopoly_count > 0):
+        i_need = None
 
-            # pick the resource we have the least of (for plenty second pick)
-            resources = player.get("resources", {}) or {}
-            # ensure all standard keys exist with 0 default
-            _keys = ["wood", "brick", "sheep", "wheat", "ore"]
-            for kk in _keys:
-                resources.setdefault(kk, 0)
-            least_res = min(resources.items(), key=lambda kv: kv[1])[0]
+        if trad and isinstance(trad, dict):
+            i_need = trad.get("i_need")
 
-            if plenty_count > 0:
-                # Year of Plenty gives two resources: we pick the missing and our least held resource
-                return {"action": "play_plenty", "take": [missing_res, least_res]}
+        if not i_need:
+            # prefer settlement if possible, else city
+            if t:
+                target_cost = settlement_cost
             else:
-                # Monopoly: choose the missing resource (takes all of that type)
-                return {"action": "play_monopoly", "take": missing_res}
+                target_cost = city_cost
+
+            i_need = {}
+            for res, need in target_cost.items():
+                have = player["resources"].get(res, 0)
+                if have < need:
+                    i_need[res] = need - have
+
+        if isinstance(i_need, dict) and i_need:
+            # expand missing resources into a flat list
+            missing_resources = []
+            for res, amt in i_need.items():
+                missing_resources.extend([res] * amt)
+
+            # only act if we are missing 1 or 2 total resources
+            if 1 <= len(missing_resources) <= 2:
+                resources = player.get("resources", {}) or {}
+                _keys = ["wood", "brick", "sheep", "wheat", "ore"]
+                for kk in _keys:
+                    resources.setdefault(kk, 0)
+
+                # sort missing by how scarce they are (rarest first)
+                missing_resources.sort(key=lambda r: resources.get(r, 0))
+
+                # ---- YEAR OF PLENTY ----
+                if plenty_count > 0:
+                    # take exactly what we are missing (up to 2)
+                    take = missing_resources[:2]
+
+                    # if only 1 missing, fill with least-held resource
+                    if len(take) == 1:
+                        least_res = min(resources.items(), key=lambda kv: kv[1])[0]
+                        take.append(least_res)
+
+                    return {
+                        "action": "play_plenty",
+                        "take": take
+                    }
+
+                # ---- MONOPOLY ----
+                if monopoly_count > 0:
+                    # monopolize the rarest missing resource
+                    return {
+                        "action": "play_monopoly",
+                        "take": missing_resources[0]
+                    }
+
 
            # --- 3) TWO ROADS logic (CORRECT, settlement-aligned) ---
     try:

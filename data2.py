@@ -1025,17 +1025,17 @@ data = {
       "dev_cards": {
         "knight": 0,
         "monopoly": 0,
-        "plenty": 0,
+        "plenty": 1,
         "point": 0,
-        "road": 1
+        "road": 0
       },
       "harbours": [],
       "name": "candamir",
       "resources": {
         "brick": 0,
-        "ore": 0,
+        "ore": 1,
         "sheep": 1,
-        "wheat": 1,
+        "wheat": 2,
         "wood": 1
       },
       "roads_left": 13,

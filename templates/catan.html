@@ -427,6 +427,8 @@ document.getElementById('actRoad').addEventListener('click', ()=>{ mode='road'; 
 document.getElementById('actCity').addEventListener('click', ()=>{ mode='city'; alert('Click your settlement to upgrade to city'); });
 document.getElementById('actRobber').addEventListener('click', ()=>{mode = 'robber';alert('Click a tile to move the robber');});
 
+document.getElementById('passBtn').addEventListener('click', async ()=>{ // advance turn on server if you track turn, otherwise client rotate 
+turn = (turn + 1) % PLAYERS.length; await loadState(); renderTurnInfo(); alert('Turn passed — next player should roll dice.'); });
 
 document.getElementById('decisionBtn').addEventListener('click', async () => {
   const playerId = +document.getElementById('decisionPlayer').value;
@@ -459,9 +461,11 @@ document.getElementById('decisionBtn').addEventListener('click', async () => {
     card: () => `• Buy DEVELOPMENT CARD`
   };
 
-  for (const [key, val] of Object.entries(data.decision)) {
-    if (actionLabels[key]) {
-      msg += actionLabels[key](val) + '\n';
+  const actionOrder = ["city", "settlement","card", "road"];
+
+  for (const key of actionOrder) {
+    if (data.decision[key] !== undefined) {
+      msg += actionLabels[key](data.decision[key]) + '\n';
     }
   }
 
