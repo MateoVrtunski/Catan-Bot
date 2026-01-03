@@ -529,76 +529,111 @@ def in_game_strat(players, player_id, intersections, roads, board):
 
         return missing, extra
 
-    strategy_1 = {}
-    trad = {"i_need": None, "i_give": None}
-
     if can_afford(player, city_cost) == True and player["settlements_left"] < 5:
         strategy_1 = {"city": city_loc}
-        trad = {"i_need":None, "i_give": None}
-        return strategy_1, trad
+        trad_1 = {"i_need":None, "i_give": None}
+        return strategy_1, trad_1
     
     if can_afford(player, settlement_cost) == True and player["settlements_left"] > 0 and t == True:
-        strategy_1 = {"settlement": set_loc}
-        trad = {"i_need":None, "i_give": None}
-        return strategy_1, trad
+        strategy_2 = {"settlement": set_loc}
+        trad_2 = {"i_need":None, "i_give": None}
+        return strategy_2, trad_2
     
     missing_city, extra_city = compute_missing_and_extra(city_cost)
-    if (player["settlements_left"] < 5 and sum(missing_city.values()) == 1 and len(extra_city) > 0) or player["settlements_left"] == 0:
+    missing_set, extra_set = compute_missing_and_extra(settlement_cost)
+    missing_card, extra_card = compute_missing_and_extra(card_cost)
+    missing_road, extra_road = compute_missing_and_extra(road_cost)
+
+    city_clause = (player["settlements_left"] < 5 and sum(missing_city.values()) == 1 and len(extra_city) > 0) or player["settlements_left"] == 0
+    settlment_clause = player["settlements_left"] > 0 and t == True and sum(missing_set.values()) == 1 and len(extra_set) > 0
+    road_clause = sum(missing_road.values()) == 1 and len(extra_road) > 0 and t == False
+    card_clause = sum(missing_card.values()) == 1 and len(extra_card) > 0
+
+    if city_clause and can_afford(player, card_cost) == True:
+        strategy_1 = {"city": city_loc, "card": None}
+        trad = {"i_need": missing_city, "i_give": extra_city}
+        return strategy_1, trad
+    
+    if city_clause and can_afford(player, road_cost) == True and t == False:
+        strategy_1 = {"city": city_loc, "road": set_loc}
+        trad = {"i_need": missing_city, "i_give": extra_city}
+        return strategy_1, trad
+    
+    if city_clause and card_clause:
+        strategy_1 = {"city": city_loc, "card": None}
+        trad = {"i_need": missing_city, "i_give": extra_city, "i_need_2": missing_card, "i_give_2": extra_card}
+        return strategy_1, trad
+    
+    if city_clause and road_clause:
+        strategy_1 = {"city": city_loc, "road": set_loc}
+        trad = {"i_need": missing_city, "i_give": extra_city, "i_need_2": missing_road, "i_give_2": extra_road}
+        return strategy_1, trad
+    
+    if city_clause:
         strategy_1 = {"city": city_loc}
         trad = {"i_need": missing_city, "i_give": extra_city}
         return strategy_1, trad
-
-    missing_set, extra_set = compute_missing_and_extra(settlement_cost)
-    if player["settlements_left"] > 0 and t == True and sum(missing_set.values()) == 1 and len(extra_set) > 0:
+    
+    if settlment_clause and can_afford(player, card_cost) == True:
+        strategy_1 = {"settlement": set_loc, "card": None}
+        trad = {"i_need": missing_set, "i_give": extra_set}
+        return strategy_1, trad
+    
+    if settlment_clause and card_clause:
+        strategy_1 = {"settlement": set_loc, "card": None}
+        trad = {"i_need": missing_set, "i_give": extra_set, "i_need_2": missing_card, "i_give_2": extra_card}
+        return strategy_1, trad
+    
+    if settlment_clause:
         strategy_1 = {"settlement": set_loc}
         trad = {"i_need": missing_set, "i_give": extra_set}
         return strategy_1, trad
     
     if can_afford(player, card_cost) == True:
         strategy_1 = {"card": None}
-        trad = {"i_need":None, "i_give": None}
+        trad = {"i_need": None, "i_give": None}
         return strategy_1, trad
     
-    if can_afford(player, road_cost) == True and t == False:
-        strategy_1 = {"road": set_loc}
-        trad = {"i_need":None, "i_give": None}
-        return strategy_1, trad
-    
-    missing_card, extra_card = compute_missing_and_extra(card_cost)
-    if player["settlements_left"] < 5 and sum(missing_card.values()) == 1 and len(extra_card) > 0:
-        strategy_1 = {"card": None}
+    if card_clause and can_afford(player, road_cost) and t == False:
+        strategy_1 = {"card": None, "road": set_loc}
         trad = {"i_need": missing_card, "i_give": extra_card}
         return strategy_1, trad
     
-    missing_road, extra_road = compute_missing_and_extra(road_cost)
-    if player["settlements_left"] < 5 and sum(missing_road.values()) == 1 and len(extra_road) > 0 and t == False:
+    if card_clause and road_clause:
+        strategy_1 = {"card": None, "road": set_loc}
+        trad = {"i_need": missing_card, "i_give": extra_card, "i_need_2": missing_road, "i_give_2": extra_road}
+        return strategy_1, trad
+    
+    if can_afford(player, road_cost) and t == False:
+        strategy_1 = {"road": set_loc}
+        trad = {"i_need": None, "i_give": None}
+        return strategy_1, trad
+    
+    if road_clause:
         strategy_1 = {"road": set_loc}
         trad = {"i_need": missing_road, "i_give": extra_road}
         return strategy_1, trad
     
     total_res = sum(resources.values())
 
-    if total_res > 7:
+    if total_res > 5:
         i_give = {}
         i_need = {}
 
         for res, amt in resources.items():
             if amt > 3:
-                # give surplus (cap to 2 per resource)
                 i_give[res] = min(amt - 3, 2)
             elif amt <= 1:
                 i_need[res] = 1
 
-        # only suggest trade if it makes sense
         if i_give and i_need:
             return {}, {"i_need": i_need, "i_give": i_give}
 
-    # ---------- 4) Do nothing ----------
     return {}, {"i_need": None, "i_give": None}
 
     
 
-print(settlement_possible(0,data2.data["roads"],data2.data["intersection"], data2.data["board"]))
+print(in_game_strat(data2.data["players"], 0,data2.data["intersection"],data2.data["roads"], data2.data["board"]))
 
 
 def card_decision(player_id, players, board, intersections, robber, roads=None):

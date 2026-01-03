@@ -428,61 +428,59 @@ document.getElementById('actCity').addEventListener('click', ()=>{ mode='city'; 
 document.getElementById('actRobber').addEventListener('click', ()=>{mode = 'robber';alert('Click a tile to move the robber');});
 
 
-document.getElementById('passBtn').addEventListener('click', async ()=>{
-  // advance turn on server if you track turn, otherwise client rotate
-  turn = (turn + 1) % PLAYERS.length;
-  await loadState();
-  renderTurnInfo();
-  alert('Turn passed — next player should roll dice.');
-});
-
-document.getElementById('decisionBtn').addEventListener('click', async ()=>{
+document.getElementById('decisionBtn').addEventListener('click', async () => {
   const playerId = +document.getElementById('decisionPlayer').value;
 
   const res = await fetch('/api/decision/in_game', {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ player: playerId })
   });
 
-  if(!res.ok){
+  if (!res.ok) {
     alert('Decision failed');
     return;
   }
 
   const data = await res.json();
 
-  if(data.decision === null){
+  if (!data.decision || Object.keys(data.decision).length === 0) {
     alert('No useful action available');
     return;
   }
 
   let msg = `Player ${playerId} decision:\n`;
 
-  if(data.decision.city !== undefined){
-    msg += `• Build CITY at intersection ${data.decision.city}\n`;
+  // ----- ACTIONS (in order they appear) -----
+  const actionLabels = {
+    city: (v) => `• Build CITY at intersection ${v}`,
+    settlement: (v) => `• Build SETTLEMENT at intersection ${v}`,
+    road: (v) => `• Build ROAD toward intersection ${v}`,
+    card: () => `• Buy DEVELOPMENT CARD`
+  };
+
+  for (const [key, val] of Object.entries(data.decision)) {
+    if (actionLabels[key]) {
+      msg += actionLabels[key](val) + '\n';
+    }
   }
 
-  if(data.decision.settlement !== undefined){
-    msg += `• Build SETTLEMENT at intersection ${data.decision.settlement}\n`;
-  }
-
-  if(data.decision.road !== undefined){
-    msg += `• Build ROAD toward intersection ${data.decision.road}\n`;
-  }
-
-  if(data.decision.card !== undefined){
-    msg += `• Buy CARD \n`;
-  }
-
-  if(data.trade && data.trade.i_need){
-    msg += '\nSuggested trade:\n';
+  // ----- TRADES -----
+  if (data.trade && data.trade.i_need) {
+    msg += '\nPrimary trade suggestion:\n';
     msg += `Need: ${JSON.stringify(data.trade.i_need)}\n`;
-    msg += `Give: ${JSON.stringify(data.trade.i_give)}`;
+    msg += `Give: ${JSON.stringify(data.trade.i_give)}\n`;
+  }
+
+  if (data.trade && data.trade.i_need_2) {
+    msg += '\nFallback trade (if first fails):\n';
+    msg += `Need: ${JSON.stringify(data.trade.i_need_2)}\n`;
+    msg += `Give: ${JSON.stringify(data.trade.i_give_2)}\n`;
   }
 
   alert(msg);
 });
+
 
 // Card button -> ask server what card to play for the selected player
 document.getElementById('cardBtn').addEventListener('click', async () => {
