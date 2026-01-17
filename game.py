@@ -1,7 +1,8 @@
 # Main python file linking the other files together with the html files
 from flask import Flask, render_template, jsonify, request
 from action import CatanGame
-from strategy import first_two_settlements, strategy as STRATEGY, in_game_strat, robber_decision, card_decision
+from strategy import first_two_settlements, in_game_strat, robber_decision, card_decision
+from linear_program import choose_strategy_from_board
 
 GAME = None
 
@@ -17,6 +18,14 @@ INTERSECTIONS = []
 ROBBER_TILE = 9
 LONGEST_ROAD_OWNER = None   
 LARGEST_ARMY_OWNER = None 
+
+
+def compute_robber_tile(board):
+    for i, t in enumerate(board):
+        if t.get("type") == "desert":
+            return i
+    return None
+
 
 # Routes
 
@@ -45,6 +54,8 @@ def api_get_board():
 
 @app.post("/api/board")
 def api_save_board():
+    global BOARD, HARBOURS, ROBBER_TILE
+
     try:
         data = request.get_json()
         board = data.get("board")
@@ -61,10 +72,19 @@ def api_save_board():
         HARBOURS.clear()
         HARBOURS.extend(harbours)
 
-        return jsonify({"ok": True}), 200
+        robber = compute_robber_tile(BOARD)
+        if robber is None:
+            return "Board must contain exactly one desert tile", 400
+
+        ROBBER_TILE = robber
+
+        app.logger.info("Robber initialized on tile %s", ROBBER_TILE)
+
+        return jsonify({"ok": True, "robber_tile": ROBBER_TILE}), 200
 
     except Exception as e:
         return str(e), 400
+
 
 
 @app.get("/api/players")
@@ -105,7 +125,7 @@ def api_state():
         "largest_army": LARGEST_ARMY_OWNER
     })
 
-# Bot placement
+# Bot decision
  
 @app.get("/api/decision")
 def api_decision():
@@ -127,7 +147,7 @@ def api_decision():
         return jsonify({"ok": False, "error": "server board or intersections not ready"}), 500
 
     try:
-        result = first_two_settlements(STRATEGY, INTERSECTIONS, BOARD, player=player_id)
+        result = first_two_settlements(INTERSECTIONS, BOARD, player=player_id)
         if isinstance(result, tuple) or isinstance(result, list):
             settlement_idx = result[0]
             road_idx = result[1] if len(result) > 1 else None
@@ -135,7 +155,14 @@ def api_decision():
             settlement_idx = result.get("settlement") if isinstance(result, dict) else None
             road_idx = result.get("road") if isinstance(result, dict) else None
         
-        return jsonify({"ok": True, "settlement": settlement_idx, "road": road_idx})
+
+        try:
+            strat_info = choose_strategy_from_board(BOARD)
+            chosen_name = strat_info.get("strategy_choice")
+        except Exception:
+            chosen_name = None
+
+        return jsonify({"ok": True, "settlement": settlement_idx, "road": road_idx, "strategy_choice": chosen_name,})
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -309,7 +336,36 @@ def api_set_resources():
 
 
 
+@app.post("/api/knight_played")
+def api_knight_played():
+    global GAME
+    if GAME is None:
+        return jsonify({"ok": False, "error": "game not started"}), 400
 
+    data = request.get_json() or {}
+    player = data.get("player")
+
+    if player is None:
+        return jsonify({"ok": False, "error": "player required"}), 400
+
+    try:
+        pid = int(player)
+    except Exception:
+        return jsonify({"ok": False, "error": "player must be integer"}), 400
+
+    try:
+        p = GAME.players[pid]
+        p.setdefault("knights_played", 0)
+        p["knights_played"] += 1
+
+        return jsonify({
+            "ok": True,
+            "knights_played": p["knights_played"]
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.post("/api/build/settlement")
@@ -530,7 +586,7 @@ def award_largest_army():
 
 @app.post("/api/card/decision")
 def api_card_decision():
-    global GAME, INTERSECTIONS, BOARD, ROBBER_TILE
+    global GAME, INTERSECTIONS, BOARD, ROBBER_TILE, ROADS
     if GAME is None:
         return jsonify({"ok": False, "error": "game not started"}), 400
 
@@ -545,10 +601,25 @@ def api_card_decision():
         return jsonify({"ok": False, "error": "player must be integer"}), 400
 
     try:
-        result = card_decision(player_id, GAME.players, BOARD, INTERSECTIONS, ROBBER_TILE)
+        roads = getattr(GAME, "roads", None)
+        if roads is None:
+            roads = globals().get("ROADS", []) or []
+
+        app.logger.debug("CARD_DECISION: player=%s, dev_cards=%r, roads=%r", player_id,
+                         (GAME.players[player_id].get("dev_cards") if len(GAME.players) > player_id else None),
+                         roads)
+
+        result = card_decision(player_id, GAME.players, BOARD, INTERSECTIONS, ROBBER_TILE, roads)
+
+        if result is None:
+            result = {}
+
+        app.logger.debug("CARD_DECISION result for player %s: %r", player_id, result)
+
         return jsonify({"ok": True, "decision": result})
     except Exception as e:
-        import traceback; traceback.print_exc()
+        import traceback
+        traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # Main 

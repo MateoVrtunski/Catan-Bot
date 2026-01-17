@@ -1,79 +1,14 @@
 # Here are the bot decisions made
 import data, data2
-import pulp as pl
+import linear_program
 
 
-prob = pl.LpProblem("City_Optimized_Weights", pl.LpMaximize)
-
-a = pl.LpVariable("ore",   lowBound=0, upBound=10)
-b = pl.LpVariable("wheat", lowBound=0, upBound=10)
-c = pl.LpVariable("sheep", lowBound=0, upBound=10)
-d = pl.LpVariable("wood",  lowBound=0, upBound=10)
-e = pl.LpVariable("brick", lowBound=0, upBound=10)
-
-
-prob += 3*a + 2*b - c - d - e, "City_Strategy_Objective"
-
-# Done by examples of decisions
-
-prob += 5*d + 5*e + 5*c >= 4*a + 7*b
-prob += 4*a + 7*b >= 5*c + 4*d + 4*e
-prob += 5*a >= 5.5*b
-prob += 5*c >= 2*d + 2*e
-prob += d == e
-
-
-prob.solve()
-
-
-i = data.inter
-bo = data.board
-i2 = data.inter2
-second = data.second
-
-
-
-strategy = {
-                "wheat": b.value(),
-                "ore": a.value(),
-                "wood": d.value(),
-                "sheep": c.value(),
-                "brick": e.value()
-            }
-
-def look_at_board(board):
-
-    for i in board:
-        if i["number"] in (2, 12):
-            i["number"] = 1
-        elif i["number"] in (3, 11):
-            i["number"]= 2
-        elif i["number"] in (4, 10):
-            i["number"] = 3
-        elif i["number"] in (5, 9):
-            i["number"] = 4
-        elif i["number"] in (6, 8):
-            i["number"] = 5
-
-    rarity = [[],[],[],[],[]]
-    res = ["ore", "wheat", "sheep","brick","wood"]
-
-    for i in range(len(res)):
-        for j in range(len(board)):
-            if board[j]["type"] == res[i]:
-                rarity[i].append(board[j]["number"])
-
-    res_on_turn = []
-    for i in range(len(rarity)):
-        res_on_turn.append(sum(rarity[i])/36)
-
-    return res_on_turn
 
 
 # Deciding the first two settlment is the most important part in Catan, the bot decision is based on the strategy chosen for the game
-def first_two_settlements(strategy, intersections, board, player=None):
+def first_two_settlements(intersections, board, player=None):
    
-    local_strategy = dict(strategy)
+    local_strategy = dict(linear_program.choose_strategy_from_board(board)["winner"])
 
     if player is not None:
         owned_settlements = [
@@ -143,7 +78,7 @@ def first_two_settlements(strategy, intersections, board, player=None):
         iv = intersections[idx]
         hv = iv.get("harbor", iv.get("harbour", None))
         if hv is not None and hv != "None":
-            total += 15
+            total += 10
 
         for tile in tiles:
             if tile is None or tile.get("type") == "desert":
@@ -214,7 +149,6 @@ def robber_decision(player_id, players, board, intersections, robber_tile=None):
         key=lambda x: x[1].get("victory_points", 0)
     )
 
-    # --- 2. Score tiles ---
     tile_scores = {}
 
     for iv in intersections:
@@ -238,7 +172,6 @@ def robber_decision(player_id, players, board, intersections, robber_tile=None):
             if number not in DICE_PROB:
                 continue
 
-            # skip tiles where current player also benefits
             skip = False
             for iv2 in intersections:
                 if (
@@ -267,7 +200,6 @@ players=data.players_in_game
 intersections = data.int_in_game
 roads = data.roads_in_game
 
-print(robber_decision(0,players,bo,intersections,9))
 
 city_cost = {"wheat": 2, "ore": 3}
 settlement_cost ={"wheat":1, "sheep":1, "wood":1,"brick":1}
@@ -308,7 +240,6 @@ def settlement_possible(player_id, roads, intersections, board):
     if not player_roads:
         return False, None
 
-    # collect all nodes that appear in any player's road (ignore None)
     road_nodes = set()
     for r in player_roads:
         a = r.get("a"); b = r.get("b")
@@ -317,7 +248,6 @@ def settlement_possible(player_id, roads, intersections, board):
         if b is not None:
             road_nodes.add(b)
 
-    # helper: intersection occupied checks
     def is_occupied_by_any(iv):
         occ = iv.get("occupiedBy")
         return occ is not None and occ != "None"
@@ -326,10 +256,8 @@ def settlement_possible(player_id, roads, intersections, board):
         occ = iv.get("occupiedBy")
         return occ == pid
 
-    # endpoints used later (filter out indices out of range and nodes already occupied by player)
     endpoints = {n for n in road_nodes if 0 <= n < len(intersections) and not is_occupied_by_player(intersections[n], player_id)}
 
-    # 1) Check buildable now from the road endpoints themselves
     buildable_now = []
     scored_future_candidates = []
 
@@ -339,10 +267,8 @@ def settlement_possible(player_id, roads, intersections, board):
         iv = intersections[node]
 
         if is_occupied_by_any(iv):
-            # can't build on an occupied intersection
             pass
 
-        # rule: no adjacent occupied intersections
         neighbor_blocked = False
         for n in iv.get("neighbors", []):
             if 0 <= n < len(intersections):
@@ -350,7 +276,6 @@ def settlement_possible(player_id, roads, intersections, board):
                     neighbor_blocked = True
                     break
 
-        # compute score (tile probabilities + harbour)
         score = 0.0
         for hi in iv.get("adjacentHexes", []):
             if 0 <= hi < len(board):
@@ -372,7 +297,6 @@ def settlement_possible(player_id, roads, intersections, board):
         best_score, best_node = buildable_now[0]
         return True, best_node
 
-    # 2) Look at distance-1 candidates (neighbors of endpoints, excluding endpoints themselves)
     neighbor_candidates = set()
     for node in endpoints:
         iv = intersections[node]
@@ -383,7 +307,6 @@ def settlement_possible(player_id, roads, intersections, board):
     neighbor_candidates = {n for n in neighbor_candidates if 0 <= n < len(intersections) and n not in endpoints}
 
     def score_and_filter(candidate_nodes):
-        """Given iterable of nodes, apply occupancy and adjacency rules and return scored list."""
         scored = []
         for node in sorted(candidate_nodes):
             iv = intersections[node]
@@ -418,13 +341,10 @@ def settlement_possible(player_id, roads, intersections, board):
         scored_neighbors.sort(reverse=True, key=lambda x: (x[0], x[1]))
         return False, scored_neighbors[0][1]
 
-    # 3) FALLBACK: if no distance-1 candidates, try distance-2 (BFS up to depth 2 from road_nodes)
-    # (this implements your "range of 2" fallback while keeping the same occupancy/neighbour rules)
-    distance2_candidates = set()
     for start in road_nodes:
         if not (0 <= start < len(intersections)):
             continue
-        # BFS up to depth 2
+
         q = deque([(start, 0)])
         visited = {start}
         while q:
@@ -440,13 +360,11 @@ def settlement_possible(player_id, roads, intersections, board):
                 visited.add(nb)
                 nd = dist + 1
                 if nd == 2:
-                    # exclude original road nodes (we want nodes two steps away, not the road nodes themselves)
                     if nb not in road_nodes:
                         distance2_candidates.add(nb)
                 else:
                     q.append((nb, nd))
 
-    # remove nodes already considered (endpoints or immediate neighbors)
     distance2_candidates = {n for n in distance2_candidates if n not in endpoints and n not in neighbor_candidates}
 
     scored_distance2 = score_and_filter(distance2_candidates)
@@ -455,7 +373,6 @@ def settlement_possible(player_id, roads, intersections, board):
         scored_distance2.sort(reverse=True, key=lambda x: (x[0], x[1]))
         return False, scored_distance2[0][1]
 
-    # 4) final fallback: return best future candidate from the originally-scored endpoints
     if scored_future_candidates:
         scored_future_candidates.sort(reverse=True, key=lambda x: (x[0], x[1]))
         return False, scored_future_candidates[0][1]
@@ -465,27 +382,20 @@ def settlement_possible(player_id, roads, intersections, board):
 
 
 def city_placement(player_id, intersections, board):
-    """
-    Returns the intersection (settlement position) with the highest
-    total probability of its adjacent hexes, for upgrading to a city.
-    """
-
-    # --- helper: probability of a number token
+    
     def tile_probability(number):
         if number is None or number < 2 or number > 12:
             return 0
-        return (6 - abs(number - 7)) / 36    # standard Catan distribution
+        return (6 - abs(number - 7)) / 36  
 
     best_score = -1
     best_intersection = None
 
     for iv in intersections:
-        # check if this is the player's settlement
         if iv.get("occupiedBy") == player_id and iv.get("type") == "settlement":
             
             total_prob = 0
             
-            # sum probabilities of adjacent tiles
             for hi in iv.get("adjacentHexes", []):
                 if 0 <= hi < len(board):
                     tile = board[hi]
@@ -499,6 +409,7 @@ def city_placement(player_id, intersections, board):
 
     return best_intersection
 
+# Main function for the bot decision
 
 def in_game_strat(players, player_id, intersections, roads, board):
 
@@ -621,7 +532,7 @@ def in_game_strat(players, player_id, intersections, roads, board):
     
     total_res = sum(resources.values())
 
-    if total_res > 5:
+    if total_res > 2:
         i_give = {}
         i_need = {}
 
@@ -638,8 +549,6 @@ def in_game_strat(players, player_id, intersections, roads, board):
 
     
 
-print(in_game_strat(data2.data["players"], 0,data2.data["intersection"],data2.data["roads"], data2.data["board"]))
-
 
 def card_decision(player_id, players, board, intersections, robber, roads=None):
 
@@ -647,7 +556,6 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
     player = players[player_id]
     cards = player.get("dev_cards", {}) or {}
 
-    # helper: does robber sit next to one of our buildings?
     def robber_on_our_tile():
         if robber is None:
             return False
@@ -657,15 +565,15 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
                     return True
         return False
 
-    # --- 1) KNIGHT logic ---
+    # Card: Knight, we play the knight if we have 2 of them, the robber is on our land or we already played 2 so we play it to get largest army
+    played = player["knights_played"]
     try:
         knight_count = int(cards.get("knight", 0))
     except Exception:
         knight_count = 0
 
     try:
-        if (knight_count == 1 and robber_on_our_tile()) or knight_count > 1:
-            # move robber now to hurt strongest opponent
+        if (knight_count == 1 and robber_on_our_tile()) or knight_count > 1 or played > 1:
             if "robber_decision" in globals():
                 rd = robber_decision(player_id, players, board, intersections, robber)
             else:
@@ -676,7 +584,6 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
             else:
                 return {"action": "play_knight", "reason": "no good target found"}
         if knight_count >= 2 and (not robber_on_our_tile()):
-            # we have 2+ knights and robber isn't on our tiles -> proactively move robber
             if "robber_decision" in globals():
                 rd = robber_decision(player_id, players, board, intersections, robber)
             else:
@@ -687,12 +594,13 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
             else:
                 return {"action": "play_knight", "reason": "no good target found"}
     except Exception:
-        # don't crash; fall through to other cards
         pass
     
 
     t,set_loc = settlement_possible(player_id, roads, intersections, board)
-    # --- 2) YEAR OF PLENTY / MONOPOLY logic ---
+
+    #Cards: Years of plenty and monopoly, looks at what we are missing for next big decision and asks for it
+
     try:
         plenty_count = int(cards.get("plenty", 0))
     except Exception:
@@ -702,12 +610,9 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
     except Exception:
         monopoly_count = 0
 
-    # Ask in_game_strat whether it suggests a trade (we pass empty roads if not available)
     trad = None
     try:
         if "in_game_strat" in globals():
-            # some implementations of in_game_strat expect (players, player_id, intersections, roads, board)
-            # but you may have a different signature — adjust if needed.
             strat_result = in_game_strat(players, player_id, intersections, roads, board)
             if strat_result is not None:
                 _, trad = strat_result
@@ -721,7 +626,6 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
             i_need = trad.get("i_need")
 
         if not i_need:
-            # prefer settlement if possible, else city
             if t:
                 target_cost = settlement_cost
             else:
@@ -734,27 +638,21 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
                     i_need[res] = need - have
 
         if isinstance(i_need, dict) and i_need:
-            # expand missing resources into a flat list
             missing_resources = []
             for res, amt in i_need.items():
                 missing_resources.extend([res] * amt)
 
-            # only act if we are missing 1 or 2 total resources
             if 1 <= len(missing_resources) <= 2:
                 resources = player.get("resources", {}) or {}
                 _keys = ["wood", "brick", "sheep", "wheat", "ore"]
                 for kk in _keys:
                     resources.setdefault(kk, 0)
 
-                # sort missing by how scarce they are (rarest first)
                 missing_resources.sort(key=lambda r: resources.get(r, 0))
 
-                # ---- YEAR OF PLENTY ----
                 if plenty_count > 0:
-                    # take exactly what we are missing (up to 2)
                     take = missing_resources[:2]
 
-                    # if only 1 missing, fill with least-held resource
                     if len(take) == 1:
                         least_res = min(resources.items(), key=lambda kv: kv[1])[0]
                         take.append(least_res)
@@ -763,17 +661,15 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
                         "action": "play_plenty",
                         "take": take
                     }
-
-                # ---- MONOPOLY ----
+                
                 if monopoly_count > 0:
-                    # monopolize the rarest missing resource
                     return {
                         "action": "play_monopoly",
                         "take": missing_resources[0]
                     }
 
 
-           # --- 3) TWO ROADS logic (CORRECT, settlement-aligned) ---
+    # Card: Two Road, searches the best two roads to build.
     try:
         road_card_count = int(cards.get("road", 0))
     except Exception:
@@ -782,7 +678,6 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
     if road_card_count <= 0:
         return None
 
-    # settlement_possible already encodes legality + best target
     try:
         can_build, target = settlement_possible(player_id, roads, intersections, board)
     except Exception:
@@ -793,13 +688,11 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
 
     from collections import deque
 
-    # build adjacency graph from intersections
     adj = {
         i: set(iv.get("neighbors", []))
         for i, iv in enumerate(intersections)
     }
 
-    # collect player road nodes + existing edges
     player_nodes = set()
     existing_edges = set()
     for r in roads:
@@ -825,7 +718,6 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
                     return True
         return False
 
-    # --- BFS from player's road network (depth ≤ 2) ---
     q = deque()
     parent = {}
     dist = {}
@@ -860,7 +752,6 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
     if not found:
         return None
 
-    # --- reconstruct path ---
     path = []
     n = target
     while parent[n] is not None:
@@ -868,16 +759,13 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
         n = parent[n]
     path.reverse()
 
-    # path length determines behavior
     if len(path) == 2:
-        # perfect: exactly two roads to target
         return {
             "action": "play_two_roads",
             "edges": [{"a": a, "b": b} for a, b in path]
         }
 
     if len(path) == 1:
-        # one road to target → add best second road
         first_edge = path[0]
         new_nodes = set(player_nodes)
         new_nodes.add(first_edge[1])
@@ -922,9 +810,5 @@ def card_decision(player_id, players, board, intersections, robber, roads=None):
 
     return None
 
-
-
-
-print(card_decision(0,data2.data["players"], data2.data["board"], data2.data["intersection"], data2.data["robber_tile"], data2.data["roads"]))
 
     

@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Catan board editor — index.html</title>
-  <!-- use Flask's static helper; if you open file directly you can change this to "static/style.css" -->
   <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
@@ -13,7 +12,6 @@
       <div class="left panel">
         <h1>CATAN</h1>
         <div class="board-wrap" id="boardWrap">
-          <!-- SVG board rendered by JS -->
           <svg id="boardSvg" width="760" height="620" viewBox="-380 -310 760 620"></svg>
         </div>
       </div>
@@ -22,11 +20,10 @@
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
             <strong>Tile inputs</strong>
-            <div class="small">Edit each tile's resource + token number. Save to play.</div>
+            <div class="small">Click on the "Fill standard sample" sample button. Edit each tile's resource + token number and harbours. Save to play.</div>
           </div>
           <div class="flex">
             <button id="saveBtn">Save to server and play</button>
-            <button id="loadFromServer">Load from server</button>
           </div>
         </div>
 
@@ -41,8 +38,6 @@
           <button id="resetBtn">Reset empty</button>
           <button id="fillStd">Fill standard sample</button>
         </div>
-
-        <div class="small" style="margin-top:6px">Saves are kept in server memory (a simple list inside <code>game.py</code>) — they are not persisted to disk. Use "Load from server" to retrieve the most recently saved board.</div>
       </div>
     </div>
   </div>
@@ -70,7 +65,7 @@ let board = [];
 let harbours = HARBOUR_POS.map(h => ({...h}));
 let hexSize = 55;
 
-// precompute axial lists (sorted to match expected indexing)
+
 const LAND_AXIAL = (() => {
   const arr = generateAxialCoordsRadius(2).filter(c => Math.max(Math.abs(c.q), Math.abs(c.r), Math.abs(-c.q-c.r)) <= 2);
   arr.sort((a,b) => a.r - b.r || a.q - b.q);
@@ -114,8 +109,6 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   }
 });
 
-
-document.getElementById('loadFromServer').addEventListener('click', loadFromServer);
 document.getElementById('resetBtn').addEventListener('click', () => { board = emptyBoard(); render(); rebuildInputs(); });
 document.getElementById('fillStd').addEventListener('click', () => { board = SAMPLE.map(x => ({ ...x })); render(); rebuildInputs(); });
 
@@ -237,16 +230,13 @@ function render(){
       svg.appendChild(rob);
     }
 
-    // click to focus input
     const g = document.createElementNS('http://www.w3.org/2000/svg','g');
-    // wrap polygon and texts: for simplicity we used separate shapes above, but we still attach id to an empty group for flash target
     g.setAttribute('id', `land-${i}`);
     svg.appendChild(g);
   });
 
   // draw harbours as small circles with text
   harbours.forEach((h,i) => {
-    // place harbour slightly outward from the water center so it's visible on the edge
     const p = axialToPixel(h.q, h.r, size * 1.05);
     const r = Math.max(10, size * 0.25);
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');

@@ -24,7 +24,10 @@
       <div class="controls panel" style="min-width:320px">
         <div>
           <strong>Placement</strong>
-          <div class="small">Click a highlighted intersection to select it, then confirm. After each settlement you must place a road adjacent to it.</div>
+          <div class="small">Click a highlighted intersection to select it, then confirm. After each settlement you must place a road adjacent to it. If you want the Helper's decision then input your player id (0,1 or 2) and click on the decision button. It will show you the best place for the chosen startegy and the road to place after.
+
+          </div>
+          <div id="strategyDisplay" class="small" style="color: red"></div>
         </div>
 
         <div style="margin-top:10px">
@@ -40,9 +43,7 @@
           <button id="decisionBtn" style="margin-left:8px">Get decision</button>
           <div id="decisionResult" class="small" style="margin-top:6px"></div>
         </div>
-
         <hr style="margin:12px 0">
-
         <div>
           <strong>Placed settlements & roads</strong>
           <div id="placedList" class="small" style="margin-top:8px"></div>
@@ -89,16 +90,17 @@ const placedList = document.getElementById('placedList');
 
 let hexSize = 55;
 let LAND_AXIAL = [], WATER_AXIAL = [];
-let board = [];         // 19 tiles
-let harbours = [];      // 9 harbour objects
-let players = [];       // [{name,color},...]
-let intersections = []; // computed intersections
-let roads = [];         // local roads mirror of server
+let board = [];         
+let harbours = [];      
+let players = [];       
+let intersections = []; 
+let roads = [];         
 let placementSequence = [];
 let placementIndex = 0;
 let selectedIntersection = null;
-let pendingSettlement = null; // used to place road after settlement
+let pendingSettlement = null; 
 let inRoadMode = false;
+let ROBBER_TILE = null;
 
 /* ---------- load state (board, players, placements, roads) ---------- */
 async function loadState(){
@@ -111,6 +113,7 @@ async function loadState(){
     harbours = Array.isArray(data.harbours) && data.harbours.length? data.harbours : [];
     players = Array.isArray(data.players) ? data.players : [];
     roads = Array.isArray(data.roads) ? data.roads : [];
+    ROBBER_TILE = data.robber_tile;
 
     if(players.length < 2) {
       statusText.textContent = 'Need at least 2 players. Go back to the players page.';
@@ -122,18 +125,17 @@ async function loadState(){
 
     computeIntersections();
     assignHarborsToIntersections();
-    // merge saved placements (if any) into intersections
+    
     if(Array.isArray(data.placements)){
       data.placements.forEach(p => {
         if(intersections[p.intersection]) intersections[p.intersection].occupiedBy = p.player;
       });
     }
-    // merge saved roads
+   
     if(Array.isArray(data.roads)){
       roads = data.roads.slice();
     }
 
-     // save computed intersections to server
     await fetch("/api/intersections", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -172,7 +174,6 @@ function computeIntersections(){
     temp.push({id: id++, x: v.x, y: v.y, adjacentHexes: Array.from(v.adjacentHexes), occupiedBy: "None", neighbors: []});
   }
 
-  // neighbors by distance
   const threshold = hexSize * 1.1;
   for(let i=0;i<temp.length;i++){
     for(let j=0;j<temp.length;j++){
@@ -184,7 +185,6 @@ function computeIntersections(){
     }
   }
 
-  // sort deterministic and reassign ids
   temp.sort((a,b)=> a.x - b.x || a.y - b.y);
   const idMap = new Map(); temp.forEach((t,i)=> idMap.set(t.id,i));
   temp.forEach((t,i)=>{ t.id=i; t.neighbors = t.neighbors.map(old => idMap.get(old)); });
@@ -249,10 +249,8 @@ async function postRoad(playerIndex, a, b){
   });
   if(res.ok){
     const j = await res.json();
-    // reflect server-side road list if returned
     if(j && j.road) roads.push(j.road);
   } else {
-    // still add locally for UX
     roads.push({player: playerIndex, a, b});
   }
 }
@@ -342,21 +340,26 @@ function render(){
       base.setAttribute('fill', '#ffffff'); base.setAttribute('stroke','#2ecc71'); base.setAttribute('stroke-width', 2);
     }
 
-    // adjacent resource letters
-    if(iv.adjacentHexes && iv.adjacentHexes.length>0){
-      const label = document.createElementNS('http://www.w3.org/2000/svg','text');
-      label.setAttribute('x', 0); label.setAttribute('y', -Math.max(10, size*0.18));
-      label.setAttribute('text-anchor','middle'); label.setAttribute('class','small');
-      const resNames = iv.adjacentHexes.map(hi => board[hi] && board[hi].type ? board[hi].type[0].toUpperCase() : '-').join(',');
-      label.textContent = resNames;
-      svg.appendChild(label);
-    }
+    if (ROBBER_TILE !== null && LAND_AXIAL[ROBBER_TILE]) {
+    const ax = LAND_AXIAL[ROBBER_TILE];
+    const p = axialToPixel(ax.q, ax.r, hexSize);
 
-    // click handler
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('class', 'robber');
+
+    const body = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    body.setAttribute('cx', p.x);
+    body.setAttribute('cy', p.y);
+    body.setAttribute('r', hexSize * 0.45);
+    body.setAttribute('fill', '#000');
+    body.setAttribute('stroke', '#fff');
+    body.setAttribute('stroke-width', '4');
+
+    g.appendChild(body);
+    svg.appendChild(g);
+  }
     g.addEventListener('click', async () => {
       if(inRoadMode){
-        // when in road mode, clicking intersections can select endpoint for edge if needed
-        // we choose only edges when clicking edge lines, not intersections here
         return;
       }
       if(!isLegalPlace(iv)) return;
@@ -437,6 +440,8 @@ function updateUI(){
       const roadsPlaced = roads.filter(r=>r.player===i).map(r=>`${r.a}-${r.b}`);
       return `<div><strong>${pl.name}</strong>: settlements ${placed.length} (${placed.join(',')}) roads (${roadsPlaced.join(',')})</div>`;
     }).join('');
+    // clear strategy display when finished
+    document.getElementById('strategyDisplay').innerText = '';
     return;
   }
 
@@ -449,10 +454,20 @@ function updateUI(){
     const roadsPlaced = roads.filter(r=>r.player===i).map(r=>`${r.a}-${r.b}`);
     return `<div><strong>${pl.name}</strong>: settlements ${placed.length} (${placed.join(',')}) roads (${roadsPlaced.join(',')})</div>`;
   }).join('');
-  // controls
   confirmBtn.style.display = (selectedIntersection !== null && !inRoadMode) ? 'inline-block' : 'none';
   cancelSelectionBtn.style.display = (selectedIntersection !== null && !inRoadMode) ? 'inline-block' : 'none';
+
+  try {
+    loadPlacementDecision(turnPlayerIndex).catch(err => {
+      console.warn('loadPlacementDecision failed:', err);
+      document.getElementById('strategyDisplay').innerText = 'Strategy: (error)';
+    });
+  } catch (e) {
+    console.warn('loadPlacementDecision thrown:', e);
+    document.getElementById('strategyDisplay').innerText = 'Strategy: (error)';
+  }
 }
+
 
 /* confirm settlement -> requires road placement next */
 confirmBtn.addEventListener('click', async () => {
@@ -577,6 +592,34 @@ document.getElementById('decisionBtn').addEventListener('click', async () => {
   }
 });
 
+async function loadPlacementDecision(playerId) {
+  const url = `/api/decision?player=${encodeURIComponent(playerId)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error("Decision request failed", res.status);
+    document.getElementById('strategyDisplay').innerText = "Strategy: (error retrieving)";
+    return;
+  }
+  const data = await res.json();
+  if (!data.ok) {
+    console.error("Decision API error", data.error);
+    document.getElementById('strategyDisplay').innerText = "Strategy: (error)";
+    return;
+  }
+
+  const choice = data.strategy_choice;
+
+  let txt = "";
+  if (choice) {
+    txt += `Chosen strategy is ${choice.toUpperCase()}`;
+  } else {
+    txt = "Strategy: (not available)";
+  }
+
+  document.getElementById('strategyDisplay').innerText = txt;
+
+}
+
 
 // show Start Game when placement finished
 function showStartGameButton() {
@@ -592,8 +635,6 @@ async function finalizeAndShowStart() {
   showStartGameButton();
 }
 
-// hook existing finalize path to show button
-// if you already call finalize in your flow, call finalizeAndShowStart() instead
 
 document.getElementById('startGameBtn').addEventListener('click', async () => {
   const res = await fetch('/api/start_game', { method: 'POST' });
@@ -606,7 +647,6 @@ document.getElementById('startGameBtn').addEventListener('click', async () => {
   console.log("Events on start:", data.events);
   window.location.href = '/catan';
 });
-
 
 
 /* ---------- load placements & roads from server (if any) ---------- */

@@ -16,7 +16,6 @@
 
         <form id="playersForm" style="display:flex;flex-direction:column;gap:14px;max-width:350px">
 
-          <!-- One block per player -->
           <div class="player-row">
             <label>Player 1</label>
             <input type="text" name="p1" required />
@@ -102,7 +101,6 @@ document.getElementById("playersForm").addEventListener("submit", async (e) => {
 
     if (!res.ok) throw new Error(await res.text());
 
-    // redirect to placement phase
     window.location.href = "/placement";
   }
   catch (err) {

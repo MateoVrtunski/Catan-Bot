@@ -35,7 +35,8 @@ class CatanGame:
             "roads_left": 13,
             "victory_points": 2,
             "dev_cards": [],
-            "harbours": []
+            "harbours": [],
+            "knights_played":0
         }
 
 
