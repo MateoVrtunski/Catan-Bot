@@ -28,7 +28,7 @@ How a complete turn looks like: Input the number that the dice gave you in the r
 Then if you have special cards (knight, monopoly, years of plenty, or two-roads) click the button "Card". After that click on the decison button and do as the helper says. 
 These buttons can also be played in different order. For trades, buying cards and robbing use the editor to match your ressources and cards in the real game. 
 
-Lastly: When the decision asks for a trade first ask for a 1:1 trade with real players if not trade with the bank accordingly to your harbours or if you don't have them 4:1.
+Lastly: When the decision asks for a trade first ask for a 1:1 trade with real players. If not, trade with the bank accordingly to your harbours or if you don't have them 4:1.
 
 Enjoy the game! 
 
